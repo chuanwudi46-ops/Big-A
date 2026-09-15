@@ -1,0 +1,41 @@
+name: probe3
+
+# 临时探针 v3：为板块日 K 线寻找 runner 上可用的端点。
+# 验证完成后即删除。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe kline endpoints
+        run: |
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+          REF='https://quote.eastmoney.com/'
+          F2='f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61'
+          F1='f1,f2,f3,f4,f5,f6'
+          UT='ut=bd1d9ddb04089700cf9c27f6f7426281'
+          show () {
+            printf '%-46s ' "$1"
+            out=$(curl -s -w '\n@@%{http_code}' --max-time 25 -A "$UA" -e "$REF" "$2")
+            code=$(printf '%s' "$out" | tail -1 | sed 's/@@//')
+            body=$(printf '%s' "$out" | head -c 160 | tr -d '\n')
+            echo "HTTP=$code  ${body:0:120}"
+          }
+          echo "===== push2his 参数差异 ====="
+          show 'A1 push2his lmt=10 (探针v1同款)' "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK0475&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20260101&end=20500101&lmt=10"
+          show 'A2 push2his lmt=600 无ut (实际调用)' "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'A3 push2his lmt=600 带ut' "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'A4 push2his 只beg/end 无lmt' "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915"
+          echo "===== 连续请求（测是否限流）====="
+          for i in 1 2 3 4 5; do
+            show "B$i push2his 连打 BK120$i" "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK120$i&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+            sleep 1
+          done
+          echo "===== 其他域名 ====="
+          show 'C1 push2delay kline' "https://push2delay.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'C2 push2 kline' "https://push2.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'C3 82.push2his kline' "https://82.push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'C4 push2his-delay kline' "https://push2his-delay.eastmoney.com/api/qt/stock/kline/get?secid=90.BK1201&$UT&fields1=$F1&fields2=$F2&klt=101&fqt=1&beg=20250303&end=20260915&lmt=600"
+          show 'C5 push2delay clist 复测' "https://push2delay.eastmoney.com/api/qt/clist/get?pn=1&pz=5&po=1&np=1&$UT&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f12,f14"
