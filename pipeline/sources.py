@@ -23,16 +23,20 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 REFERER = "https://quote.eastmoney.com/"
 
-# 东财 clist（板块/个股列表）接口的可用域名，按顺序尝试。
-# 实测 push2.eastmoney.com 的边缘节点不稳定：从 GitHub Actions 的海外 runner
-# 访问会 302→502，国内部分网络下也会 RemoteDisconnected。push2delay 是其
-# 「延时行情」域名，海内外均可达，且返回字段与实时域名完全一致
+# 东财公开接口的可用域名，按顺序尝试。
+# 实测 push2 / push2his 的边缘节点不稳定：从 GitHub Actions 的海外 runner 访问时，
+# push2 会 302→502，push2his 连续请求几次后直接连接失败（000）；
+# 国内部分网络下两者同样不可达。push2delay 是其镜像域名，海内外均稳定，
+# 且 clist 与 kline 两条路径都能供数，字段与实时域名完全一致
 # （含 f62 主力净流入、f184 净占比），故作为首选。
-CLIST_HOSTS = (
+EM_HOSTS = (
     "https://push2delay.eastmoney.com",
+    "https://push2his.eastmoney.com",
     "https://push2.eastmoney.com",
     "https://82.push2.eastmoney.com",
 )
+CLIST_HOSTS = EM_HOSTS          # 板块/个股列表
+KLINE_HOSTS = EM_HOSTS          # 板块日 K 线
 
 _session: requests.Session | None = None
 _session_noproxy: requests.Session | None = None
@@ -164,29 +168,39 @@ def _direct_board_snapshot() -> pd.DataFrame:
 
 
 def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600) -> pd.DataFrame:
-    """直连获取板块日 K 线。secid 形如 90.BK0475"""
-    url = ("https://push2his.eastmoney.com/api/qt/stock/kline/get"
-           f"?secid={secid}"
-           "&fields1=f1,f2,f3,f4,f5,f6"
-           "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
-           f"&klt=101&fqt=1&beg={start}&end={end}&lmt={limit}")
-    r = _get(url, timeout=20)
-    r.raise_for_status()
-    klines = (r.json().get("data") or {}).get("klines") or []
-    if not klines:
-        raise RuntimeError(f"direct kline empty for {secid}")
+    """直连获取板块日 K 线。secid 形如 90.BK0475。
 
-    # 字段顺序：日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
-    recs = []
-    for line in klines:
-        p = line.split(",")
-        recs.append({
-            "date": p[0], "open": float(p[1]), "close": float(p[2]),
-            "high": float(p[3]), "low": float(p[4]),
-            "volume": float(p[5]), "amount": float(p[6]),
-            "pct": float(p[8]), "turnover": float(p[10]),
-        })
-    return pd.DataFrame(recs)
+    按 KLINE_HOSTS 顺序容灾（push2delay 优先，见常量注释）。
+    """
+    last_err: Exception | None = None
+    for base in KLINE_HOSTS:
+        url = (f"{base}/api/qt/stock/kline/get"
+               f"?secid={secid}"
+               "&fields1=f1,f2,f3,f4,f5,f6"
+               "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
+               f"&klt=101&fqt=1&beg={start}&end={end}&lmt={limit}")
+        try:
+            r = _get(url, timeout=20)
+            r.raise_for_status()
+            klines = (r.json().get("data") or {}).get("klines") or []
+            if not klines:
+                last_err = RuntimeError(f"{base} 返回空 K 线")
+                continue
+            # 字段顺序：日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+            recs = []
+            for line in klines:
+                p = line.split(",")
+                recs.append({
+                    "date": p[0], "open": float(p[1]), "close": float(p[2]),
+                    "high": float(p[3]), "low": float(p[4]),
+                    "volume": float(p[5]), "amount": float(p[6]),
+                    "pct": float(p[8]), "turnover": float(p[10]),
+                })
+            return pd.DataFrame(recs)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            print(f"[info] K线通道不可用（{base} {secid}）：{str(e)[:80]}")
+    raise RuntimeError(f"所有 K 线通道均失败（{secid}）：{last_err}")
 
 
 def _direct_news(limit: int = 100) -> pd.DataFrame:
@@ -208,12 +222,19 @@ def _direct_news(limit: int = 100) -> pd.DataFrame:
 
 
 def _direct_board_cons(code: str) -> pd.DataFrame:
-    """直连获取板块成分股。列名与 akshare 对齐（代码 / 名称）"""
-    rows = _push2_clist(f"b:{code}+f:!50", "f12,f14", pz=500)
+    """直连获取板块成分股。列名与 akshare 对齐。
+
+    必须带上「涨跌幅」（f3）：factors.resonance 靠它算上涨家数占比与离散度，
+    缺列会把板块共振因子静默压成中性 0.5。
+    """
+    rows = _push2_clist(f"b:{code}+f:!50", "f12,f14,f3", pz=100)
     if not rows:
         raise RuntimeError(f"direct cons empty for {code}")
-    return pd.DataFrame({"代码": [str(r["f12"]) for r in rows],
-                         "名称": [str(r["f14"]) for r in rows]})
+    return pd.DataFrame({
+        "代码": [str(r["f12"]) for r in rows],
+        "名称": [str(r["f14"]) for r in rows],
+        "涨跌幅": [r.get("f3") for r in rows],
+    })
 
 
 # --------------------------------------------------------------------------
@@ -235,90 +256,90 @@ def board_list(include: set[str] | None = None) -> list[dict]:
 
 
 def board_snapshot() -> pd.DataFrame:
-    """行业板块当日快照：涨跌幅 / 换手率 / 涨跌家数 / 主力净流入占比"""
+    """行业板块当日快照：涨跌幅 / 换手率 / 涨跌家数 / 主力净流入占比
+
+    直连优先：一次请求即拿到全量板块（含 f62 主力净流入 / f184 净占比），
+    比 akshare 的「列表 + 资金流两次调用」更快，也避开了 push2 的不可用。
+    """
     try:
-        ak = _ak()
-        df = _retry(ak.stock_board_industry_name_em).rename(columns={
-            "板块代码": "code", "板块名称": "name", "涨跌幅": "pct",
-            "换手率": "turnover", "上涨家数": "up", "下跌家数": "down",
-            "总市值": "mktcap", "领涨股票": "leader",
-        })
-        df = df[[c for c in ["code", "name", "pct", "turnover", "up", "down",
-                             "mktcap", "leader"] if c in df.columns]].copy()
-        df["code"] = df["code"].astype(str)
-        try:
-            ff = _retry(ak.stock_sector_fund_flow_rank,
-                        indicator="今日", sector_type="行业资金流")
-            ff = ff.rename(columns={
-                "名称": "name",
-                "今日主力净流入-净额": "main_inflow",
-                "今日主力净流入-净占比": "main_inflow_pct",
-            })
-            cols = [c for c in ["name", "main_inflow", "main_inflow_pct"] if c in ff.columns]
-            df = df.merge(ff[cols], on="name", how="left")
-        except Exception as e:  # noqa: BLE001
-            print(f"[warn] akshare fund_flow: {e}")
-        if "main_inflow_pct" not in df.columns:
-            raise RuntimeError("akshare 未返回资金流，改用直连")
-        return df
-    except Exception as e:  # noqa: BLE001
-        print(f"[info] akshare 板块快照不可用（{e}），切换直连通道")
         return _direct_board_snapshot()
+    except Exception as e:  # noqa: BLE001
+        print(f"[info] 直连板块快照不可用（{str(e)[:80]}），回退 akshare")
+
+    ak = _ak()
+    df = _retry(ak.stock_board_industry_name_em).rename(columns={
+        "板块代码": "code", "板块名称": "name", "涨跌幅": "pct",
+        "换手率": "turnover", "上涨家数": "up", "下跌家数": "down",
+        "总市值": "mktcap", "领涨股票": "leader",
+    })
+    df = df[[c for c in ["code", "name", "pct", "turnover", "up", "down",
+                         "mktcap", "leader"] if c in df.columns]].copy()
+    df["code"] = df["code"].astype(str)
+    ff = _retry(ak.stock_sector_fund_flow_rank,
+                indicator="今日", sector_type="行业资金流")
+    ff = ff.rename(columns={
+        "名称": "name",
+        "今日主力净流入-净额": "main_inflow",
+        "今日主力净流入-净占比": "main_inflow_pct",
+    })
+    cols = [c for c in ["name", "main_inflow", "main_inflow_pct"] if c in ff.columns]
+    df = df.merge(ff[cols], on="name", how="left")
+    if "main_inflow_pct" not in df.columns:
+        raise RuntimeError("akshare 未返回资金流")
+    return df
 
 
 def board_hist(name: str, start: str, end: str, code: str | None = None) -> pd.DataFrame:
-    """板块日 K 线。start/end 格式 YYYYMMDD；code 用于直连兜底（如 BK0475）"""
-    try:
-        ak = _ak()
-        df = _retry(ak.stock_board_industry_hist_em, symbol=name,
-                    start_date=start, end_date=end, period="日k", adjust="")
-        df = df.rename(columns={
-            "日期": "date", "开盘": "open", "收盘": "close", "最高": "high",
-            "最低": "low", "成交量": "volume", "成交额": "amount",
-            "涨跌幅": "pct", "换手率": "turnover",
-        })
-        cols = [c for c in ["date", "open", "close", "high", "low",
-                            "volume", "amount", "pct", "turnover"] if c in df.columns]
-        if not df.empty:
-            return df[cols].copy()
-        raise RuntimeError("akshare 返回空")
-    except Exception as e:  # noqa: BLE001
-        if not code:
-            raise
-        print(f"[info] akshare K线不可用（{e}），切换直连：{name}")
-        return _direct_board_hist(f"90.{code}", start, end)
+    """板块日 K 线。start/end 格式 YYYYMMDD；code 为东财板块代码（如 BK1201）。
+
+    直连优先：akshare 的 stock_board_industry_hist_em 走 push2his，该域名在
+    海外 runner 上连续请求几次即连接失败，且每次失败要空等 3 次重试；
+    直连走 push2delay 稳定且更快。所有直连通道都失败时才回退 akshare。
+    """
+    if code:
+        try:
+            df = _direct_board_hist(f"90.{code}", start, end)
+            if not df.empty:
+                return df
+        except Exception as e:  # noqa: BLE001
+            print(f"[info] 直连K线不可用（{name}）：{str(e)[:80]}，回退 akshare")
+
+    ak = _ak()
+    df = _retry(ak.stock_board_industry_hist_em, symbol=name,
+                start_date=start, end_date=end, period="日k", adjust="")
+    df = df.rename(columns={
+        "日期": "date", "开盘": "open", "收盘": "close", "最高": "high",
+        "最低": "low", "成交量": "volume", "成交额": "amount",
+        "涨跌幅": "pct", "换手率": "turnover",
+    })
+    cols = [c for c in ["date", "open", "close", "high", "low",
+                        "volume", "amount", "pct", "turnover"] if c in df.columns]
+    return df[cols].copy()
 
 
 _cons_cache: dict[str, pd.DataFrame] = {}
-_cons_direct_only = False
 
 
 def board_cons(name: str, code: str | None = None) -> pd.DataFrame:
     """板块成分股（用于共振度与筹码归属）。失败返回空表。
 
-    实测 akshare 的实现走 push2.eastmoney.com，该域名在海外 runner 与
-    部分网络下不可达，且其内部重试 3 次约耗 9 秒。评分阶段要对 86 个
-    板块逐个调用，若每次都踩这个坑会白等十几分钟，故：
-    1) akshare 一旦失败即置 _cons_direct_only，后续板块直接用直连通道；
-    2) 结果按板块名 memo，避免同一次运行内重复请求。
+    直连优先（单次请求，含涨跌幅），akshare 兜底。结果按板块名 memo，
+    避免同一次运行内重复请求（评分阶段 31 个板块各调用一次）。
     """
-    global _cons_direct_only
-
     cached = _cons_cache.get(name)
     if cached is not None:
         return cached
 
     df = pd.DataFrame()
-    if not _cons_direct_only:
-        try:
-            df = _retry(_ak().stock_board_industry_cons_em, symbol=name)
-        except Exception as e:  # noqa: BLE001
-            print(f"[info] akshare 成分股不可用（{str(e)[:80]}），切换直连通道")
-            _cons_direct_only = True
-
-    if (df is None or df.empty) and code:
+    if code:
         try:
             df = _direct_board_cons(code)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] 直连成分股不可用（{name}）：{str(e)[:80]}，回退 akshare")
+
+    if df is None or df.empty:
+        try:
+            df = _retry(_ak().stock_board_industry_cons_em, symbol=name)
         except Exception as e:  # noqa: BLE001
             print(f"[warn] cons {name}: {e}")
             df = pd.DataFrame()
