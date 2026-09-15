@@ -21,38 +21,89 @@ import sys
 CFG = pathlib.Path(__file__).resolve().parent / "config"
 META_FP = CFG / "sector_meta.json"
 
-# 东方财富行业板块：m:90+t:2 为行业板块（f:!50 排除三级细分行业）
-PUSH2 = ("https://push2.eastmoney.com/api/qt/clist/get"
-         "?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f3"
-         "&fs=m:90+t:2+f:!50&fields=f12,f14")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+# 东财行业板块：m:90+t:2 为行业板块（f:!50 排除三级细分行业）
+# 域名列表与 sources.CLIST_HOSTS 共用同一份定义，避免两处漂移。
+CLIST_PATH = ("/api/qt/clist/get?po=1&np=1&fltt=2&invt=2&fid=f3"
+              "&fs=m:90+t:2+f:!50&fields=f12,f14")
 
 
 def _fetch_boards() -> list[tuple[str, str]]:
     """优先 akshare，失败回退东财直连。实测 akshare 硬编码的分片域名
-    （17.push2.eastmoney.com）在部分网络下不可达，故需要兜底。"""
-    try:
-        import akshare as ak
+    （17.push2.eastmoney.com）以及 push2.eastmoney.com 本身在部分网络下
+    不可达（含 GitHub Actions 的海外 runner），故做多域名容灾。
 
-        df = ak.stock_board_industry_name_em()
-        out = [(str(r["板块代码"]), str(r["板块名称"])) for _, r in df.iterrows()]
-        if out:
-            print(f"  数据来源：akshare（{len(out)} 个板块）")
+    注意：必须走分页取全量。服务端单页上限为 100，只请求一次会静默丢掉
+    3/4 的板块（东财现行行业体系约 496 个）。
+    """
+    # 板块宇宙白名单：存在则只保留名单内的板块（用于收敛到一级/二级行业）
+    universe_fp = CFG / "board_universe.json"
+    include: set[str] | None = None
+    if universe_fp.exists():
+        try:
+            include = set(json.loads(universe_fp.read_text(encoding="utf-8"))["names"])
+            print(f"  已加载板块宇宙白名单：{len(include)} 个名称")
+        except Exception as e:  # noqa: BLE001
+            print(f"  [warn] 读取 {universe_fp.name} 失败，改用全量板块：{e}")
+
+    def _apply_universe(out: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        if not include:
             return out
-    except Exception as e:  # noqa: BLE001
-        print(f"  akshare 不可用（{e}），切换直连通道")
+        kept = [x for x in out if x[1] in include]
+        missed = sorted(include - {x[1] for x in kept})
+        if missed:
+            print(f"  [warn] 白名单中 {len(missed)} 个名称在实时清单里不存在："
+                  f"{'、'.join(missed[:15])}{'…' if len(missed) > 15 else ''}")
+        return kept
+
+    if not include:
+        try:
+            import akshare as ak
+
+            df = ak.stock_board_industry_name_em()
+            out = [(str(r["板块代码"]), str(r["板块名称"])) for _, r in df.iterrows()]
+            if out:
+                print(f"  数据来源：akshare（{len(out)} 个板块）")
+                return out
+        except Exception as e:  # noqa: BLE001
+            print(f"  akshare 不可用（{str(e)[:90]}），切换直连通道")
+
+    from sources import CLIST_HOSTS, REFERER, UA
 
     import requests
 
-    r = requests.get(PUSH2, timeout=15,
-                     headers={"User-Agent": "Mozilla/5.0",
-                              "Referer": "https://quote.eastmoney.com/"})
-    r.raise_for_status()
-    diff = (r.json().get("data") or {}).get("diff") or []
-    if not diff:
-        raise RuntimeError("直连通道也未能获取板块清单，请检查网络")
-    out = [(str(d["f12"]), str(d["f14"])) for d in diff]
-    print(f"  数据来源：东财直连（{len(out)} 个板块）")
-    return out
+    headers = {"User-Agent": UA, "Referer": REFERER}
+    last_err: Exception | None = None
+    for host in CLIST_HOSTS:
+        # trust_env 两轮：先按环境代理设置走，失败则忽略代理重试
+        for trust_env in (True, False):
+            try:
+                s = requests.Session()
+                s.trust_env = trust_env
+                out: list[tuple[str, str]] = []
+                pn = 1
+                while pn <= 50:
+                    u = (f"{host}{CLIST_PATH}&pn={pn}&pz=100")
+                    r = s.get(u, timeout=20, headers=headers)
+                    r.raise_for_status()
+                    data = r.json().get("data") or {}
+                    diff = data.get("diff") or []
+                    if not diff:
+                        break
+                    out += [(str(d["f12"]), str(d["f14"])) for d in diff]
+                    if len(diff) < 100 or len(out) >= int(data.get("total") or 0):
+                        break
+                    pn += 1
+                if out:
+                    kept = _apply_universe(out)
+                    print(f"  数据来源：东财直连 {host}"
+                          f"（全量 {len(out)} 个 → 采用 {len(kept)} 个）")
+                    return kept
+                last_err = RuntimeError(f"{host} 返回空 diff")
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+    raise RuntimeError(f"直连通道也未能获取板块清单，请检查网络：{last_err}")
 
 
 def build_meta(boards_raw: list[tuple[str, str]], seed: dict) -> dict:

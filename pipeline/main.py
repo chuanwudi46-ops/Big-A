@@ -226,7 +226,7 @@ def stage_score(w: dict, meta: dict) -> None:
             "clearing": F.clearing(b.get("clearing_score", 0.5)),
             "policy": F.policy(F.count_hits(news, policy_words)),
             "news": news_norm,
-            "resonance": F.resonance(sources.board_cons(b["name"])),
+            "resonance": F.resonance(sources.board_cons(b["name"], b["code"])),
         }
 
         base = S.combine(f, w["weights"])

@@ -21,16 +21,56 @@ SLEEP = 1.5
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+REFERER = "https://quote.eastmoney.com/"
+
+# 东财 clist（板块/个股列表）接口的可用域名，按顺序尝试。
+# 实测 push2.eastmoney.com 的边缘节点不稳定：从 GitHub Actions 的海外 runner
+# 访问会 302→502，国内部分网络下也会 RemoteDisconnected。push2delay 是其
+# 「延时行情」域名，海内外均可达，且返回字段与实时域名完全一致
+# （含 f62 主力净流入、f184 净占比），故作为首选。
+CLIST_HOSTS = (
+    "https://push2delay.eastmoney.com",
+    "https://push2.eastmoney.com",
+    "https://82.push2.eastmoney.com",
+)
 
 _session: requests.Session | None = None
+_session_noproxy: requests.Session | None = None
+
+
+def _build_session(trust_env: bool) -> requests.Session:
+    s = requests.Session()
+    s.trust_env = trust_env
+    s.headers.update({"User-Agent": UA, "Referer": REFERER})
+    return s
 
 
 def _sess() -> requests.Session:
     global _session
     if _session is None:
-        _session = requests.Session()
-        _session.headers.update({"User-Agent": UA, "Referer": "https://quote.eastmoney.com/"})
+        _session = _build_session(True)
     return _session
+
+
+def _sess_noproxy() -> requests.Session:
+    """忽略环境代理的会话。
+
+    本机若配置了系统级代理（Windows 注册表 / HTTP_PROXY 环境变量），
+    requests 默认会走它，而该代理对东财域名常常不可用（ProxyError）。
+    首次请求失败后自动改用本会话重试。
+    """
+    global _session_noproxy
+    if _session_noproxy is None:
+        _session_noproxy = _build_session(False)
+    return _session_noproxy
+
+
+def _get(url: str, timeout: int = 20) -> requests.Response:
+    """带「代理降级」的 GET：正常会话失败后改用忽略代理的会话再试一次"""
+    try:
+        return _sess().get(url, timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return _sess_noproxy().get(url, timeout=timeout)
 
 
 def _retry(fn, *args, **kwargs):
@@ -53,23 +93,57 @@ def _ak():
 # --------------------------------------------------------------------------
 # 东方财富直连通道
 # --------------------------------------------------------------------------
-def _push2_clist(fs: str, fields: str, pz: int = 100) -> list[dict]:
-    """板块/个股列表直连（push2）。返回原始 diff 列表"""
+def _push2_clist_on(base: str, fs: str, fields: str, pz: int) -> list[dict]:
+    """在指定域名上分页拉取 clist。
+
+    注意：服务端把单页上限硬编码为 100（请求 pz=200/500 也只回 100 条），
+    因此翻页条件不能拿 pz 比，必须拿「服务端实际页大小」比，否则大数据集
+    （如 496 个行业板块、成分股数百只的板块）会被静默截断。
+    """
+    page_size = min(pz, 100)
     rows: list[dict] = []
+    total: int | None = None
     pn = 1
-    while True:
-        url = ("https://push2.eastmoney.com/api/qt/clist/get"
-               f"?pn={pn}&pz={pz}&po=1&np=1&fltt=2&invt=2&fid=f3&fs={fs}&fields={fields}")
-        r = _sess().get(url, timeout=15)
+    while pn <= 50:                       # 防御：pn 失效时不至于死循环
+        url = (f"{base}/api/qt/clist/get"
+               f"?pn={pn}&pz={page_size}&po=1&np=1&fltt=2&invt=2&fid=f3"
+               f"&fs={fs}&fields={fields}")
+        r = _get(url, timeout=15)
         r.raise_for_status()
-        diff = (r.json().get("data") or {}).get("diff") or []
+        data = r.json().get("data") or {}
+        diff = data.get("diff") or []
+        if total is None and data.get("total") is not None:
+            try:
+                total = int(data["total"])
+            except (TypeError, ValueError):
+                total = None
         if not diff:
             break
         rows.extend(diff)
-        if len(diff) < pz:
+        if total is not None and len(rows) >= total:
+            break
+        if len(diff) < page_size:         # 不足一页 => 已到末页
             break
         pn += 1
     return rows
+
+
+def _push2_clist(fs: str, fields: str, pz: int = 100) -> list[dict]:
+    """板块/个股列表直连（clist）。返回原始 diff 列表。
+
+    按 CLIST_HOSTS 顺序做多域名容灾，任一域名返回有效数据即成功。
+    """
+    last_err: Exception | None = None
+    for base in CLIST_HOSTS:
+        try:
+            rows = _push2_clist_on(base, fs, fields, pz)
+            if rows:
+                return rows
+            last_err = RuntimeError(f"{base} 返回空列表")
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            print(f"[info] clist 通道不可用（{base}）：{str(e)[:90]}")
+    raise RuntimeError(f"所有 clist 通道均失败：{last_err}")
 
 
 def _direct_board_snapshot() -> pd.DataFrame:
@@ -96,7 +170,7 @@ def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600) -> pd
            "&fields1=f1,f2,f3,f4,f5,f6"
            "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
            f"&klt=101&fqt=1&beg={start}&end={end}&lmt={limit}")
-    r = _sess().get(url, timeout=20)
+    r = _get(url, timeout=20)
     r.raise_for_status()
     klines = (r.json().get("data") or {}).get("klines") or []
     if not klines:
@@ -119,7 +193,7 @@ def _direct_news(limit: int = 100) -> pd.DataFrame:
     """直连获取东财 7x24 快讯"""
     url = ("https://np-listapi.eastmoney.com/comm/web/getFastNewsList"
            f"?client=web&biz=web_724&fastColumn=102&sortEnd=&pageSize={limit}&req_trace=1")
-    r = _sess().get(url, timeout=15)
+    r = _get(url, timeout=15)
     r.raise_for_status()
     items = (r.json().get("data") or {}).get("fastNewsList") or []
     if not items:
@@ -133,9 +207,33 @@ def _direct_news(limit: int = 100) -> pd.DataFrame:
     return df.dropna(subset=["time"])
 
 
+def _direct_board_cons(code: str) -> pd.DataFrame:
+    """直连获取板块成分股。列名与 akshare 对齐（代码 / 名称）"""
+    rows = _push2_clist(f"b:{code}+f:!50", "f12,f14", pz=500)
+    if not rows:
+        raise RuntimeError(f"direct cons empty for {code}")
+    return pd.DataFrame({"代码": [str(r["f12"]) for r in rows],
+                         "名称": [str(r["f14"]) for r in rows]})
+
+
 # --------------------------------------------------------------------------
 # 板块
 # --------------------------------------------------------------------------
+def board_list(include: set[str] | None = None) -> list[dict]:
+    """行业板块清单（全量分页），返回 [{code, name}]。
+
+    东财现行行业体系约 496 个板块，混合了一级 / 二级 / 三级细分，
+    接口不提供层级字段。`include` 为可选的名称白名单，用于把板块宇宙
+    收敛到指定的那份名单（见 config/board_universe.json）。
+    """
+    rows = _push2_clist("m:90+t:2+f:!50", "f12,f14", pz=100)
+    out = [{"code": str(r["f12"]), "name": str(r["f14"])} for r in rows
+           if r.get("f12") and r.get("f14")]
+    if include:
+        out = [b for b in out if b["name"] in include]
+    return out
+
+
 def board_snapshot() -> pd.DataFrame:
     """行业板块当日快照：涨跌幅 / 换手率 / 涨跌家数 / 主力净流入占比"""
     try:
@@ -191,13 +289,44 @@ def board_hist(name: str, start: str, end: str, code: str | None = None) -> pd.D
         return _direct_board_hist(f"90.{code}", start, end)
 
 
-def board_cons(name: str) -> pd.DataFrame:
-    """板块成分股（用于共振度计算）。失败返回空表"""
-    try:
-        return _retry(_ak().stock_board_industry_cons_em, symbol=name)
-    except Exception as e:  # noqa: BLE001
-        print(f"[warn] cons {name}: {e}")
-        return pd.DataFrame()
+_cons_cache: dict[str, pd.DataFrame] = {}
+_cons_direct_only = False
+
+
+def board_cons(name: str, code: str | None = None) -> pd.DataFrame:
+    """板块成分股（用于共振度与筹码归属）。失败返回空表。
+
+    实测 akshare 的实现走 push2.eastmoney.com，该域名在海外 runner 与
+    部分网络下不可达，且其内部重试 3 次约耗 9 秒。评分阶段要对 86 个
+    板块逐个调用，若每次都踩这个坑会白等十几分钟，故：
+    1) akshare 一旦失败即置 _cons_direct_only，后续板块直接用直连通道；
+    2) 结果按板块名 memo，避免同一次运行内重复请求。
+    """
+    global _cons_direct_only
+
+    cached = _cons_cache.get(name)
+    if cached is not None:
+        return cached
+
+    df = pd.DataFrame()
+    if not _cons_direct_only:
+        try:
+            df = _retry(_ak().stock_board_industry_cons_em, symbol=name)
+        except Exception as e:  # noqa: BLE001
+            print(f"[info] akshare 成分股不可用（{str(e)[:80]}），切换直连通道")
+            _cons_direct_only = True
+
+    if (df is None or df.empty) and code:
+        try:
+            df = _direct_board_cons(code)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] cons {name}: {e}")
+            df = pd.DataFrame()
+
+    if df is None:
+        df = pd.DataFrame()
+    _cons_cache[name] = df
+    return df
 
 
 # --------------------------------------------------------------------------
@@ -327,7 +456,7 @@ def stock_board_map(boards: list[dict], workers: int = 6) -> pd.DataFrame:
     from concurrent.futures import ThreadPoolExecutor  # 局部导入，避免顶层开销
 
     def one(b: dict):
-        cons = board_cons(b["name"])
+        cons = board_cons(b["name"], b.get("code"))
         if cons is None or cons.empty:
             return []
         code_col = next((c for c in ("代码", "股票代码", "证券代码") if c in cons.columns), None)
