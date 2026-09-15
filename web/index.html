@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#0e1116" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="板块评分" />
+<title>板块评分工作台</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header>
+  <div class="macro" id="macro">加载中…</div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main id="main">
+  <div class="skel">正在加载评分…</div>
+</main>
+
+<footer>
+  评分仅作研究参考，不构成投资建议 · 数据来源：公开免费接口
+</footer>
+
+<!-- 自选管理面板 -->
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-head">
+    <b>自选板块</b>
+    <span id="selcount">0 / 12</span>
+    <button id="sheetClose">完成</button>
+  </div>
+  <input id="search" type="search" placeholder="搜索板块…" autocomplete="off" />
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+<div class="mask" id="mask" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

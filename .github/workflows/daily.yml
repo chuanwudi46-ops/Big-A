@@ -1,0 +1,102 @@
+name: daily-score
+
+on:
+  schedule:
+    # GitHub Actions cron 使用 UTC 时间；北京时间 = UTC + 8
+    - cron: "40 5 * * 1-5"    # 13:40 BJT 预热：抓历史K线 / 解禁 / 新闻
+    - cron: "0 6 * * 1-5"     # 14:00 BJT 主评分：盘中快照 -> 12维 -> 发布
+    - cron: "30 7 * * 1-5"    # 15:30 BJT 收盘复核：重算并归档
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "warmup | score | close"
+        required: true
+        default: "score"
+        type: choice
+        options: [warmup, score, close]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-score
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      # K 线增量缓存跨运行持久化。86 个板块 × 560 天 K 线约 3MB，
+      # parquet 每日整体重写，提交进 git 会让仓库持续膨胀（年增约 1GB），
+      # 故改用 Actions Cache。key 唯一 + restore-keys 前缀：每次取最近的，
+      # 命中后 warmup 只需补当日增量，避免每天重下全量被限流。
+      - name: Restore kline cache
+        uses: actions/cache@v4
+        with:
+          path: web/data/cache
+          key: kline-${{ github.run_id }}
+          restore-keys: |
+            kline-
+
+      - name: Resolve stage
+        id: s
+        run: |
+          if [ -n "${{ inputs.stage }}" ]; then
+            st="${{ inputs.stage }}"
+          elif [ "${{ github.event.schedule }}" = "40 5 * * 1-5" ]; then
+            st=warmup
+          elif [ "${{ github.event.schedule }}" = "30 7 * * 1-5" ]; then
+            st=close
+          else
+            st=score
+          fi
+          echo "stage=$st" >> "$GITHUB_OUTPUT"
+          echo "resolved stage: $st"
+
+      - name: Run pipeline
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+        run: python pipeline/main.py --stage ${{ steps.s.outputs.stage }}
+
+      - name: Commit data artifacts
+        run: |
+          git config user.name  "workbench-bot"
+          git config user.email "bot@users.noreply.github.com"
+          # 同时提交 config：sector_meta.json 首次构建自动生成后需固化，
+          # weights.yaml / keywords_seed.json 的手动调整也应留痕
+          git add -A web/data pipeline/config
+          if git diff --cached --quiet; then
+            echo "no data change"
+          else
+            git commit -m "data: ${{ steps.s.outputs.stage }} $(date -u +%FT%TZ)"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: run
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

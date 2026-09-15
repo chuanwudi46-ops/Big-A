@@ -1,0 +1,43 @@
+# ================= Python =================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ================= 密钥 / 凭据（绝不提交）=================
+# TUSHARE_TOKEN 请配到 GitHub 仓库的 Settings → Secrets → Actions
+.env
+.env.*
+*.token
+tushare_token.txt
+secrets.json
+
+# ================= 编辑器 / 系统 =================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ================= 本地 agent 工作数据（非项目交付物）=================
+# 内含本地工作笔记与偏好记录，属工具侧数据，Public 仓库无需暴露
+.workbuddy/
+
+# ================= 本地临时产物 =================
+*.log
+logs/
+/tmp/
+
+# ================= K 线增量缓存（不入 git）=================
+# parquet 每个文件都会随每日增量整体重写，若提交进 git 会持续膨胀
+# （约 3MB/日 → 一年接近 1GB）。CI 改用 actions/cache 跨运行持久化，
+# 见 .github/workflows/daily.yml；本地跑仍照常读写该目录。
+web/data/cache/
+
+# ================= 注意：以下目录必须提交，不要加进忽略 =================
+# web/data/            评分产物，GitHub Pages 的发布内容
+# web/data/archive/    每日评分留痕，回测与事后复核的依据
+# pipeline/config/     权重 / 关键词 / 负面清单，改配置不改代码
+#                      其中 sector_meta.json 由首次构建自动生成后固化
