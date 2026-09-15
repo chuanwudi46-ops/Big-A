@@ -37,15 +37,28 @@ CACHE = DATA / "cache"
 
 
 # ------------------------------------------------------------------ 载入
+class Snapshots(list):
+    """快照列表。继承 list，调用方无需改动；附带载入元信息。"""
+
+    skipped_demo: int = 0
+
+
 def load_snapshots(archive_dir: pathlib.Path = ARCHIVE) -> list[dict]:
-    """读取归档快照，返回 [{date, code->score, name->..., macro}]，按日期升序"""
+    """读取归档快照，返回 [{date, code->score, name->..., macro}]，按日期升序
+
+    带 `demo: true` 标记的快照（make_demo.py 合成的）会被剔除，避免仿真
+    数据混入后得出虚高的 IC / 胜率；剔除条数记录在返回值的 .skipped_demo。
+    """
+    out = Snapshots()
     if not archive_dir.exists():
-        return []
-    out: list[dict] = []
+        return out
     for fp in sorted(archive_dir.rglob("*.json")):
         try:
             obj = json.loads(fp.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
+            continue
+        if obj.get("demo"):
+            out.skipped_demo += 1
             continue
         boards = obj.get("boards")
         if not boards:
@@ -67,7 +80,12 @@ def load_snapshots(archive_dir: pathlib.Path = ARCHIVE) -> list[dict]:
     dedup: dict[pd.Timestamp, dict] = {}
     for s in out:
         dedup[s["date"]] = s
-    return [dedup[k] for k in sorted(dedup)]
+    res = Snapshots([dedup[k] for k in sorted(dedup)])
+    res.skipped_demo = out.skipped_demo
+    if res.skipped_demo:
+        print(f"[backtest] 已剔除 {res.skipped_demo} 个合成快照（demo=true），"
+              f"不参与统计")
+    return res
 
 
 def load_klines(cache_dir: pathlib.Path = CACHE) -> dict[str, pd.DataFrame]:
@@ -164,7 +182,8 @@ def evaluate(snapshots: list[dict], klines: dict[str, pd.DataFrame],
 
     detail = pd.DataFrame(rows)
     summary: dict = {"n_dates": len(detail), "horizons": horizons,
-                     "quantiles": quantiles, "metrics": {}}
+                     "quantiles": quantiles, "metrics": {},
+                     "skipped_demo": int(getattr(snapshots, "skipped_demo", 0))}
     if detail.empty:
         return summary, detail
 
@@ -206,6 +225,14 @@ def render_report(summary: dict, detail: pd.DataFrame,
     L.append("")
     L.append(f"> 生成时间：{dt.datetime.now():%Y-%m-%d %H:%M}　|　"
              f"样本快照数：{summary['n_dates']}")
+    skipped = summary.get("skipped_demo") or 0
+    if skipped:
+        L.append(">")
+        L.append(f"> ⚠️ 已自动剔除 {skipped} 个合成快照（demo=true），"
+                 f"不参与本报告统计。")
+    L.append("")
+    L.append("> 数据来源：`web/data/archive/` 评分快照 + `web/data/cache/` K线缓存。"
+             "快照不足 20 个交易日时统计意义有限，请勿据小样本调权重。")
     L.append("")
     if summary["n_dates"] < 2:
         L.append("## ⚠️ 样本不足，无法评估")

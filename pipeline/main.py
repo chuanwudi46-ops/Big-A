@@ -317,6 +317,9 @@ def stage_score(w: dict, meta: dict) -> None:
         "macro_detail": {"liquidity": round(liq, 3), "volume_price": round(vp, 3),
                          "policy": round(pol, 3), "sentiment": round(sent, 3)},
         "boards": scored,
+        # 真实数据显式标记，与 make_demo.py 的 demo=true 对应；
+        # backtest.load_snapshots 据此剔除合成快照
+        "demo": False,
     })
     print(f"[score] {len(scored)} boards | macro={m} ({S.macro_zone(m, ga, gn)}) "
           f"| 流动性{liq:.2f} 量价{vp:.2f} 政策{pol:.2f} 情绪{sent:.2f} | intraday={intraday}")

@@ -125,7 +125,10 @@ def simulate(out: pathlib.Path, boards: list[dict], days: int = 60,
         fp.mkdir(parents=True, exist_ok=True)
         (fp / f"{d.strftime('%Y%m%d')}_1530.json").write_text(
             json.dumps({"updated": d.strftime("%Y-%m-%dT15:30:00"),
-                        "intraday": False, "macro_score": 55.0, "boards": recs},
+                        "intraday": False, "macro_score": 55.0, "boards": recs,
+                        # demo 标记必须保留：backtest.load_snapshots 会据此
+                        # 剔除合成快照，防止仿真数据污染真实回测结论
+                        "demo": True},
                        ensure_ascii=False), encoding="utf-8")
 
     print(f"[simulate] K线缓存 {len(boards)} 个板块 × {len(dates)} 交易日")
