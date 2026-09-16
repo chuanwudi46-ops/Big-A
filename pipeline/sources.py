@@ -170,36 +170,43 @@ def _direct_board_snapshot() -> pd.DataFrame:
 def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600) -> pd.DataFrame:
     """直连获取板块日 K 线。secid 形如 90.BK0475。
 
-    按 KLINE_HOSTS 顺序容灾（push2delay 优先，见常量注释）。
+    按 KLINE_HOSTS 顺序容灾（push2delay 优先，见常量注释），并整体重试 2 轮。
+    实测 runner 上偶发 RemoteDisconnected（同一 secid 重试即成功），单轮循环
+    会让个别板块静默掉出评分（实测 30/31），故加一轮短退避重试。
     """
     last_err: Exception | None = None
-    for base in KLINE_HOSTS:
-        url = (f"{base}/api/qt/stock/kline/get"
-               f"?secid={secid}"
-               "&fields1=f1,f2,f3,f4,f5,f6"
-               "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
-               f"&klt=101&fqt=1&beg={start}&end={end}&lmt={limit}")
-        try:
-            r = _get(url, timeout=20)
-            r.raise_for_status()
-            klines = (r.json().get("data") or {}).get("klines") or []
-            if not klines:
-                last_err = RuntimeError(f"{base} 返回空 K 线")
-                continue
-            # 字段顺序：日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
-            recs = []
-            for line in klines:
-                p = line.split(",")
-                recs.append({
-                    "date": p[0], "open": float(p[1]), "close": float(p[2]),
-                    "high": float(p[3]), "low": float(p[4]),
-                    "volume": float(p[5]), "amount": float(p[6]),
-                    "pct": float(p[8]), "turnover": float(p[10]),
-                })
-            return pd.DataFrame(recs)
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-            print(f"[info] K线通道不可用（{base} {secid}）：{str(e)[:80]}")
+    for attempt in range(2):
+        if attempt:
+            time.sleep(2.5)
+        for base in KLINE_HOSTS:
+            url = (f"{base}/api/qt/stock/kline/get"
+                   f"?secid={secid}"
+                   "&fields1=f1,f2,f3,f4,f5,f6"
+                   "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61"
+                   f"&klt=101&fqt=1&beg={start}&end={end}&lmt={limit}")
+            try:
+                r = _get(url, timeout=20)
+                r.raise_for_status()
+                klines = (r.json().get("data") or {}).get("klines") or []
+                if not klines:
+                    last_err = RuntimeError(f"{base} 返回空 K 线")
+                    continue
+                # 字段顺序：日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+                recs = []
+                for line in klines:
+                    p = line.split(",")
+                    recs.append({
+                        "date": p[0], "open": float(p[1]), "close": float(p[2]),
+                        "high": float(p[3]), "low": float(p[4]),
+                        "volume": float(p[5]), "amount": float(p[6]),
+                        "pct": float(p[8]), "turnover": float(p[10]),
+                    })
+                return pd.DataFrame(recs)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                if attempt == 0 and base == KLINE_HOSTS[0]:
+                    print(f"[info] K线通道 {base} 抖动（{secid}）：{str(e)[:60]}")
+    print(f"[warn] 所有 K 线通道均失败（{secid}，已重试 2 轮）：{str(last_err)[:90]}")
     raise RuntimeError(f"所有 K 线通道均失败（{secid}）：{last_err}")
 
 
