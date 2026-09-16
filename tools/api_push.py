@@ -15,7 +15,11 @@ api.github.com 仍可达。本脚本用 Git Data API 复刻一次提交。
 用法:
     python tools/api_push.py --only path/a.py --only path/b.json
     python tools/api_push.py --only x.py --delete old/probe.yml
+    python tools/api_push.py -m "fix: 修正翻页" --only web/app.js --apply
     python tools/api_push.py                      # 仅预览默认集合
+
+提交信息：用 -m 显式指定；省略时按改动自动生成。**不要**改成沿用
+`git log -1` —— 本地 HEAD 常停在很早的提交，会让历史消息与实际改动脱节。
 """
 from __future__ import annotations
 
@@ -107,6 +111,9 @@ def main() -> int:
                     help="要推送的路径（相对仓库根，可重复）")
     ap.add_argument("--delete", action="append", default=[],
                     help="要删除的远端路径（可重复）")
+    ap.add_argument("-m", "--message", default="",
+                    help="提交信息。省略时按改动自动生成"
+                         "（本地 HEAD 的消息通常与本次改动无关，勿沿用）")
     ap.add_argument("--apply", action="store_true", help="实际提交（默认仅预览）")
     args = ap.parse_args()
 
@@ -156,8 +163,19 @@ def main() -> int:
                for p, s in changed]
     tree = api(tok, "POST", f"/repos/{OWNER}/{REPO}/git/trees",
                {"base_tree": base_tree, "tree": entries})
-    msg = subprocess.run(["git", "log", "-1", "--pretty=%B"], cwd=ROOT,
-                         capture_output=True, text=True, check=True).stdout.strip()
+    # 提交信息：显式 -m 优先；否则按改动自动生成。
+    # 为什么不再沿用 `git log -1`：本地 HEAD 往往停在很早的一次提交，
+    # 沿用它会让每次推送都挂着同一条与改动无关的消息，历史无法追溯。
+    if args.message:
+        msg = args.message.strip()
+    else:
+        paths = [p for p, _ in changed]
+        head = ("chore: 更新 %d 个文件" % len(paths)) if len(paths) > 1 \
+            else ("chore: 更新 %s" % paths[0])
+        body = "\n".join("- " + p for p in paths[:20])
+        if len(paths) > 20:
+            body += "\n- …（共 %d 个）" % len(paths)
+        msg = head + "\n\n" + body
     ident = {"name": "chuanwudi46-ops",
              "email": "chuanwudi46-ops@users.noreply.github.com"}
     commit = api(tok, "POST", f"/repos/{OWNER}/{REPO}/git/commits",
