@@ -49,6 +49,14 @@ TENCENT_KLINE = ("https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline
 TENCENT_RANK = ("https://proxy.finance.qq.com/cgi/cgi-bin/rank/pt/getRank"
                 "?board_type=hy&sort_type=price&direct=down&offset=0&count=60")
 
+# 东财数据中心（解禁 / 高管持股变动）。该域名在海内外 runner 上均可达。
+DATACENTER = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+# 高管持股变动只取近 N 天：chips.reduction_counts 用的是 30 日窗口，留足余量。
+# 服务端 filter 是性能关键 —— 不过滤要翻 344 页（实测约 9 分钟），
+# 过滤后仅 1~3 页（约 0.3 秒），且结果与全量再本地筛选完全等价。
+SHARE_WINDOW_DAYS = 45
+
 _session: requests.Session | None = None
 _session_noproxy: requests.Session | None = None
 
@@ -294,6 +302,92 @@ def _tencent_board_hist(name: str, start: str, end: str, count: int = 800) -> pd
         raise RuntimeError(f"腾讯 K 线裁剪后为空（{name}）")
     return df[["date", "open", "close", "high", "low",
                "volume", "amount", "pct", "turnover"]]
+
+
+def _datacenter_page(report: str, since_col: str | None, since: str | None,
+                     sort_columns: str, page_size: int = 500,
+                     max_pages: int = 30) -> pd.DataFrame:
+    """东财数据中心通用分页取数。
+
+    since_col/since 非空时下发服务端日期过滤 —— 这是性能关键：
+    RPT_EXECUTIVE_HOLD_DETAILS 全量有 344 页（约 9 分钟），
+    过滤到近 45 天后只剩 1~3 页（约 0.3 秒）。
+
+    坑：sortTypes 的个数必须与 sortColumns 完全一致，否则接口返回
+    `{"result": null, "message": "排序字段和顺序数量不一致"}`，且 HTTP 仍是 200。
+    """
+    from urllib.parse import urlencode
+
+    sort_cols = [c for c in sort_columns.split(",") if c]
+    base = {
+        "reportName": report,
+        "columns": "ALL",
+        "quoteColumns": "",
+        "filter": f"({since_col}>='{since}')" if since_col and since else "",
+        "pageNumber": "1", "pageSize": str(page_size),
+        # 主列降序、其余升序，与 sortColumns 一一对应
+        "sortTypes": ",".join(["-1"] + ["1"] * (len(sort_cols) - 1)),
+        "sortColumns": ",".join(sort_cols),
+        "source": "WEB", "client": "WEB",
+        "p": "1", "pageNo": "1", "pageNum": "1",
+    }
+    frames: list[pd.DataFrame] = []
+    total: int | None = None
+    got = 0
+    for page in range(1, max_pages + 1):
+        params = dict(base)
+        params.update({"pageNumber": str(page), "p": str(page),
+                       "pageNo": str(page), "pageNum": str(page)})
+        r = _get(f"{DATACENTER}?{urlencode(params)}", timeout=25)
+        r.raise_for_status()
+        payload = r.json()
+        res = payload.get("result")
+        if res is None:
+            # 接口出错时 HTTP 仍为 200，必须把 message 带出来，否则无从排查
+            raise RuntimeError(f"{report} 无 result：{str(payload.get('message'))[:80]}")
+        rows = res.get("data") or []
+        if not rows:
+            break
+        frames.append(pd.DataFrame(rows))
+        got += len(rows)
+        if total is None:
+            try:
+                total = int(res.get("count") or 0)
+            except (TypeError, ValueError):
+                total = 0
+        if total and got >= total:
+            break
+        if len(rows) < page_size:
+            break
+    if not frames:
+        raise RuntimeError(f"{report} 返回空数据")
+    return pd.concat(frames, ignore_index=True)
+
+
+def _direct_share_change(days: int = SHARE_WINDOW_DAYS) -> pd.DataFrame:
+    """直连东财：近 days 日董监高持股变动明细。
+
+    列名对齐 akshare 的 stock_hold_management_detail_em（中文列名），
+    这样 chips.reduction_counts 的候选列匹配逻辑无需改动。
+    """
+    since = (dt.date.today() - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    raw = _datacenter_page("RPT_EXECUTIVE_HOLD_DETAILS", "CHANGE_DATE", since,
+                           "CHANGE_DATE,SECURITY_CODE,PERSON_NAME")
+    df = raw.rename(columns={
+        "SECURITY_CODE": "代码", "SECURITY_NAME": "名称", "CHANGE_DATE": "日期",
+        "PERSON_NAME": "变动人", "CHANGE_SHARES": "变动股数",
+        "AVERAGE_PRICE": "成交均价", "CHANGE_AMOUNT": "变动金额",
+        "CHANGE_REASON": "变动原因", "CHANGE_RATIO": "变动比例",
+        "HOLD_TYPE": "持股种类", "POSITION_NAME": "职务",
+    })
+    keep = [c for c in ["日期", "代码", "名称", "变动人", "变动股数", "成交均价",
+                        "变动金额", "变动原因", "变动比例", "持股种类", "职务"]
+            if c in df.columns]
+    df = df[keep]
+    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+    if "变动股数" in df.columns:
+        df["变动股数"] = pd.to_numeric(df["变动股数"], errors="coerce")
+    return df
 
 
 def _direct_news(limit: int = 100) -> pd.DataFrame:
@@ -623,6 +717,13 @@ def limit_up_pool(date: str) -> tuple[int | None, int | None]:
 
 def share_change() -> pd.DataFrame:
     """高管/股东持股变动明细（用于减持压力计数）"""
+    try:
+        df = _direct_share_change()
+        if not df.empty:
+            return df
+    except Exception as e:  # noqa: BLE001
+        print(f"[info] 直连持股变动不可用（{str(e)[:80]}），回退 akshare")
+
     for fn_name in ("stock_hold_management_detail_em", "stock_hold_change_cninfo"):
         try:
             fn = getattr(_ak(), fn_name, None)
