@@ -65,9 +65,14 @@ def load_boards() -> tuple[list[dict], list[str]]:
         meta = json.loads(meta_fp.read_text(encoding="utf-8"))
         return meta["boards"], meta.get("blacklist", [])
     seed = json.loads(seed_fp.read_text(encoding="utf-8"))
+    # keywords_seed 的板块词典已按层级分组（boards_by_level），
+    # 这里优先取二级、再退回一级，最后才用老的扁平 boards 键
+    by_level = seed.get("boards_by_level") or {}
+    kw_dict = (by_level.get("申万二级行业") or by_level.get("申万一级行业")
+               or seed.get("boards") or {})
     boards = [{"code": f"BK{i:04d}", "name": n, "keywords": k,
                "clearing_stage": "未出清", "clearing_score": 0.5}
-              for i, (n, k) in enumerate(seed["boards"].items(), start=1)]
+              for i, (n, k) in enumerate(kw_dict.items(), start=1)]
     return boards, seed.get("blacklist", [])
 
 
@@ -174,6 +179,28 @@ def main() -> int:
             })
         news.sort(key=lambda x: x["t"], reverse=True)
 
+        # 合成区间位置：结构必须与 swing.swing_stats 的真实产物完全一致，
+        # 否则「回撤 / 涨幅」视图在演示模式下会渲染成空白
+        sw_windows = {}
+        for n, lb in ((20, "20 个交易日"), (60, "60 个交易日"), (250, "近一年")):
+            hi = float(rng.uniform(1200, 4000))
+            lo = hi * float(rng.uniform(0.55, 0.82))
+            cur = lo + (hi - lo) * float(rng.uniform(0.08, 0.92))
+            sw_windows[str(n)] = {
+                "label": lb, "bars": n,
+                "high": round(hi, 2), "low": round(lo, 2),
+                "high_date": (now - dt.timedelta(days=int(rng.integers(3, n)))).strftime("%Y-%m-%d"),
+                "low_date": (now - dt.timedelta(days=int(rng.integers(3, n)))).strftime("%Y-%m-%d"),
+                "days_since_high": int(rng.integers(1, n)),
+                "days_since_low": int(rng.integers(1, n)),
+                "drawdown": round(cur / hi - 1, 4),
+                "rebound": round(cur / lo - 1, 4),
+                "position": round((cur - lo) / (hi - lo), 3),
+                "at_high": False, "at_low": False,
+            }
+        sw = {"close": round(cur, 2), "date": now.strftime("%Y-%m-%d"),
+              "windows": sw_windows}
+
         rec = {
             "code": b["code"], "name": b["name"], "score": s,
             "base": round(base, 1), "label": label, "action_hint": hint,
@@ -187,6 +214,7 @@ def main() -> int:
                 "reduction_cnt": int(rng.integers(0, 4)),
             },
             "valuation_source": "price_proxy",
+            "swing": sw,
             "intraday": now.hour < 15,
             "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
             "news": news,
@@ -225,7 +253,45 @@ def main() -> int:
     (out / "index.json").write_text(json.dumps([{
         "code": r["code"], "name": r["name"], "score": r["score"],
         "label": r["label"], "action_hint": r["action_hint"],
+        "parent": r.get("parent", ""),
+        # 与 main.py 一致：带上三窗口精简版，前端才能切 20/60/250 日
+        "swing": {k: {"dd": w["drawdown"], "rb": w["rebound"],
+                      "pos": w["position"], "dsh": w["days_since_high"]}
+                  for k, w in (r.get("swing") or {}).get("windows", {}).items()},
     } for r in scored], ensure_ascii=False), encoding="utf-8")
+
+    # 合成大盘关键位：结构与 levels.build 的真实产物一致，让演示界面能完整渲染
+    def _demo_period(key: str, label: str, bars: int, close: float) -> dict:
+        return {
+            "key": key, "label": label, "bars": bars,
+            "from": "2024-01-02", "to": now.strftime("%Y-%m-%d"),
+            "range_high": round(close * 1.09, 2), "range_low": round(close * 0.88, 2),
+            "position": 0.62, "position_text": "偏上",
+            "resistance": [{"price": round(close * 1.03, 2), "gap_pct": 3.0,
+                            "date": "2026-06-01", "near": False}],
+            "support": [{"price": round(close * 0.98, 2), "gap_pct": -2.0,
+                         "date": "2026-07-01", "near": False}],
+            "at_range_high": False, "at_range_low": False,
+        }
+
+    close = 3000.0
+    periods = [_demo_period("week", "周线", 104, close),
+               _demo_period("month", "月线", 60, close),
+               _demo_period("year", "年线", 10, close)]
+    (out / "levels.json").write_text(json.dumps({
+        "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "indices": [{
+            "code": "sh000001", "name": "上证指数",
+            "date": now.strftime("%Y-%m-%d"), "close": close, "pct": 0.5,
+            "periods": periods,
+            "summary": {
+                "nearest_resistance": {"period": "周线", **periods[0]["resistance"][0]},
+                "nearest_support": {"period": "周线", **periods[0]["support"][0]},
+                "text": f"上证指数 {close:.2f}：（这行是合成演示数据，无实际含义）",
+                "notes": [],
+            },
+        }],
+    }, ensure_ascii=False), encoding="utf-8")
 
     print(f"[demo] 已生成 {len(scored)} 个板块的**合成数据** -> {out}")
     print("[demo] ⚠️ 这是假数据，仅用于界面预览，请勿据此做任何投资判断")

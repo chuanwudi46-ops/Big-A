@@ -25,8 +25,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 # 东财行业板块：m:90+t:2 为行业板块（f:!50 排除三级细分行业）
 # 域名列表与 sources.CLIST_HOSTS 共用同一份定义，避免两处漂移。
-CLIST_PATH = ("/api/qt/clist/get?po=1&np=1&fltt=2&invt=2&fid=f3"
+# 排序键用静态的 f12（代码）：用 f3 涨幅排序时盘中翻页会串位（重复 + 漏块）。
+CLIST_PATH = ("/api/qt/clist/get?po=0&np=1&fltt=2&invt=2&fid=f12"
               "&fs=m:90+t:2+f:!50&fields=f12,f14")
+
+
+def _load_universe() -> dict:
+    """读取板块宇宙白名单（可能为空 dict）"""
+    fp = CFG / "board_universe.json"
+    if not fp.exists():
+        return {}
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] 读取 {fp.name} 失败，改用全量板块：{e}")
+        return {}
 
 
 def _fetch_boards() -> list[tuple[str, str]]:
@@ -38,14 +51,10 @@ def _fetch_boards() -> list[tuple[str, str]]:
     3/4 的板块（东财现行行业体系约 496 个）。
     """
     # 板块宇宙白名单：存在则只保留名单内的板块（用于收敛到一级/二级行业）
-    universe_fp = CFG / "board_universe.json"
-    include: set[str] | None = None
-    if universe_fp.exists():
-        try:
-            include = set(json.loads(universe_fp.read_text(encoding="utf-8"))["names"])
-            print(f"  已加载板块宇宙白名单：{len(include)} 个名称")
-        except Exception as e:  # noqa: BLE001
-            print(f"  [warn] 读取 {universe_fp.name} 失败，改用全量板块：{e}")
+    universe = _load_universe()
+    include: set[str] | None = set(universe["names"]) if universe.get("names") else None
+    if include:
+        print(f"  已加载板块宇宙白名单（{universe.get('level', '?')}）：{len(include)} 个名称")
 
     def _apply_universe(out: list[tuple[str, str]]) -> list[tuple[str, str]]:
         if not include:
@@ -106,25 +115,65 @@ def _fetch_boards() -> list[tuple[str, str]]:
     raise RuntimeError(f"直连通道也未能获取板块清单，请检查网络：{last_err}")
 
 
-def build_meta(boards_raw: list[tuple[str, str]], seed: dict) -> dict:
-    """把板块清单与关键词种子合并"""
-    seed_boards = seed.get("boards") or {}
+def build_meta(boards_raw: list[tuple[str, str]], seed: dict,
+               universe: dict | None = None) -> dict:
+    """把板块清单与关键词种子合并。
+
+    按当前宇宙层级取关键词词典（boards_by_level[level]）；二级板块的
+    clearing / blacklist 从上级一级行业**继承** —— 这两张表是人工按一级
+    行业维护的，二级层面再维护一份既冗余又容易不一致。
+    """
+    universe = universe if universe is not None else _load_universe()
+    level = universe.get("level") or "申万一级行业"
+    by_level = seed.get("boards_by_level") or {}
+    kw_dict = by_level.get(level) or seed.get("boards") or {}
+    parents = universe.get("parents") or {}
+    sw_codes = universe.get("sw_codes") or {}
     clearing = seed.get("clearing") or {}
+    blacklist = seed.get("blacklist") or []
+
     boards = []
+    inherited = 0
     for code, name in boards_raw:
-        cl = clearing.get(name, {})
+        parent = parents.get(name, "")
+
+        # 出清度：自身没有就继承上级
+        cl = clearing.get(name)
+        if cl is None and parent:
+            cl = clearing.get(parent)
+            if cl is not None:
+                inherited += 1
+        cl = cl or {}
+
+        # 负面清单：按一级行业维护，二级板块名往往不含一级名（如"普钢" vs "钢铁"）
+        black = any(k in name for k in blacklist) or (
+            bool(parent) and any(k in parent for k in blacklist))
+
+        kw = kw_dict.get(name)
+        if not kw:
+            # 兜底关键词：用板块名本身，去掉申万用来与一级区分的 Ⅱ/Ⅲ 后缀
+            kw = [name.replace("Ⅱ", "").replace("Ⅲ", "")]
+
         boards.append({
             "code": code,
             "name": name,
-            "keywords": seed_boards.get(name, [name]),
+            "parent": parent,
+            # 申万行业指数 6 位码：腾讯 K 线主通道靠它（pt01 + 该码），
+            # 一级二级同一套规则，不依赖腾讯那份只有一级的行业列表
+            "sw_code": sw_codes.get(name, ""),
+            "keywords": kw,
             "clearing_stage": cl.get("stage", "未出清"),
             "clearing_score": float(cl.get("score", 0.5)),
+            "blacklisted": black,
         })
+    if inherited:
+        print(f"  {inherited} 个板块的出清度继承自上级一级行业")
     return {
-        "version": "1.0",
-        "updated": "2026-09-15",
+        "version": "1.1",
+        "updated": "2026-09-16",
+        "level": level,
         "boards": boards,
-        "blacklist": seed.get("blacklist", []),
+        "blacklist": blacklist,
         "policy_signals": seed.get("policy_signals", {}),
         "price_signals": seed.get("price_signals", []),
     }
@@ -135,12 +184,13 @@ def write_meta(meta: dict) -> pathlib.Path:
     META_FP.write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                        encoding="utf-8")
     n = len(meta.get("boards") or [])
-    print(f"[ok] {n} 个板块 -> {META_FP}")
+    print(f"[ok] {n} 个板块（{meta.get('level', '?')}）-> {META_FP}")
     missing = [b["name"] for b in meta.get("boards", [])
-               if b.get("keywords") == [b["name"]]]
+               if len(b.get("keywords") or []) <= 1
+               and (b.get("keywords") or [""])[0] == b["name"].replace("Ⅱ", "").replace("Ⅲ", "")]
     if missing:
         print(f"[hint] {len(missing)} 个板块暂无专用关键词，"
-              f"建议补进 keywords_seed.json 的 boards（可显著提升新闻匹配率）：")
+              f"建议补进 keywords_seed.json 的 boards_by_level（可显著提升新闻匹配率）：")
         print("       " + "、".join(missing[:30])
               + ("…" if len(missing) > 30 else ""))
     return META_FP

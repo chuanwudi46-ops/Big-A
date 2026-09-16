@@ -16,11 +16,20 @@
 
 <header>
   <div class="macro" id="macro">加载中…</div>
+  <div class="tabs" id="tabs">
+    <button data-view="score" class="on">板块评分</button>
+    <button data-view="swing">回撤 / 涨幅</button>
+  </div>
   <div class="chips" id="chips"></div>
 </header>
 
 <main id="main">
-  <div class="skel">正在加载评分…</div>
+  <!-- 大盘关键位卡片独立成块：它由 levels.json 驱动，与视图切换无关，
+       放在 #body 之外可避免被评分视图的整块重绘冲掉 -->
+  <div id="lvCard"></div>
+  <div id="body">
+    <div class="skel">正在加载评分…</div>
+  </div>
 </main>
 
 <footer>

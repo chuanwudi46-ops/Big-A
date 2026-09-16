@@ -73,13 +73,32 @@ def load_map(max_age_days: int = MAP_MAX_AGE_DAYS) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _map_covers(cached: pd.DataFrame, boards: list[dict]) -> bool:
+    """缓存里是否已覆盖当前所有板块。
+
+    没有这一步会有一个很隐蔽的故障：切换板块宇宙（如一级 31 → 二级 127）后，
+    缓存仍是旧的那批板块 —— load_map 只看非空和时效，于是 127 个板块里大多数
+    匹配不到任何成分股，筹码罚分**全部静默归零**，页面上却看不出任何异常。
+    用「包含」而非「相等」：从 127 切回 31 时无需重建。
+    """
+    if cached.empty or "board_code" not in cached.columns:
+        return False
+    have = set(cached["board_code"].astype(str).unique())
+    want = {str(b["code"]) for b in boards}
+    return want <= have
+
+
 def build_map(boards: list[dict], force: bool = False) -> pd.DataFrame:
     """构建并缓存映射表（板块成分股并集）"""
     if not force:
         cached = load_map()
         if not cached.empty:
-            print(f"[chips] 复用板块映射缓存（{len(cached)} 条）")
-            return cached
+            if _map_covers(cached, boards):
+                print(f"[chips] 复用板块映射缓存（{len(cached)} 条）")
+                return cached
+            print(f"[chips] 缓存映射未覆盖当前板块宇宙"
+                  f"（缓存 {cached['board_code'].nunique()} 个板块 < 需要 "
+                  f"{len({b['code'] for b in boards})} 个），重建 …")
 
     print(f"[chips] 构建个股-板块映射，共 {len(boards)} 个板块 …")
     df = sources.stock_board_map(boards)

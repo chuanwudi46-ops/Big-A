@@ -1,507 +1,1893 @@
 {
-  "version": "1.0",
-  "updated": "2026-09-15",
+  "version": "1.1",
+  "updated": "2026-09-16",
+  "level": "申万二级行业",
   "boards": [
     {
-      "code": "BK1201",
-      "name": "电子",
+      "code": "BK0420",
+      "name": "航空机场",
+      "parent": "交通运输",
+      "sw_code": "801991",
       "keywords": [
-        "半导体",
-        "芯片",
-        "晶圆",
-        "光刻",
-        "存储",
-        "DRAM",
-        "NAND",
-        "封测",
-        "先进封装",
-        "EDA",
-        "面板",
-        "PCB",
-        "被动元件",
-        "消费电子",
-        "MLCC"
+        "航空",
+        "机场",
+        "航空公司",
+        "客座率",
+        "民航",
+        "国际航线"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.55
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK0437",
-      "name": "煤炭",
+      "code": "BK0421",
+      "name": "铁路公路",
+      "parent": "交通运输",
+      "sw_code": "801179",
       "keywords": [
-        "煤炭",
-        "动力煤",
-        "焦煤",
-        "煤价",
-        "长协",
-        "电煤"
-      ],
-      "clearing_stage": "已出清",
-      "clearing_score": 0.85
-    },
-    {
-      "code": "BK1200",
-      "name": "电力设备",
-      "keywords": [
-        "光伏",
-        "风电",
-        "储能",
-        "锂电",
-        "动力电池",
-        "逆变器",
-        "硅料",
-        "组件",
-        "特高压",
-        "电网投资",
-        "智能电网",
-        "固态电池"
-      ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.4
-    },
-    {
-      "code": "BK0478",
-      "name": "有色金属",
-      "keywords": [
-        "铜",
-        "铝",
-        "锂",
-        "镍",
-        "稀土",
-        "钴",
-        "黄金",
-        "白银",
-        "钨",
-        "小金属",
-        "金属价格"
+        "铁路",
+        "高速公路",
+        "高铁",
+        "公路",
+        "收费公路"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1203",
-      "name": "非银金融",
-      "keywords": [
-        "券商",
-        "证券",
-        "两融",
-        "经纪",
-        "投行",
-        "保险",
-        "寿险",
-        "保费",
-        "保险资金"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK1215",
-      "name": "通信",
-      "keywords": [
-        "光模块",
-        "光通信",
-        "CPO",
-        "5G",
-        "6G",
-        "运营商",
-        "基站",
-        "卫星互联网",
-        "海缆",
-        "光芯片"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK0479",
-      "name": "钢铁",
-      "keywords": [
-        "钢铁",
-        "螺纹钢",
-        "铁矿石",
-        "粗钢",
-        "特钢",
-        "高炉",
-        "限产"
-      ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.3
-    },
-    {
-      "code": "BK0456",
-      "name": "家用电器",
-      "keywords": [
-        "家电",
-        "白电",
-        "黑电",
-        "空调",
-        "冰箱",
-        "洗衣机",
-        "以旧换新"
-      ],
-      "clearing_stage": "已出清",
-      "clearing_score": 0.8
-    },
-    {
-      "code": "BK1206",
-      "name": "基础化工",
-      "keywords": [
-        "化工",
-        "纯碱",
-        "农药",
-        "化肥",
-        "氟化工",
-        "制冷剂",
-        "磷化工",
-        "煤化工",
-        "钛白粉",
-        "树脂",
-        "涨价函"
-      ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.4
-    },
-    {
-      "code": "BK1210",
-      "name": "交通运输",
+      "code": "BK0422",
+      "name": "物流",
+      "parent": "交通运输",
+      "sw_code": "801178",
       "keywords": [
         "物流",
         "快递",
-        "航运",
-        "港口",
-        "集运",
-        "航空",
-        "铁路",
-        "高速公路",
+        "供应链",
+        "仓储",
+        "电商快递",
         "运价"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1283",
-      "name": "银行",
+      "code": "BK0424",
+      "name": "水泥",
+      "parent": "建筑材料",
+      "sw_code": "801711",
       "keywords": [
-        "银行",
-        "息差",
-        "净息差",
-        "不良率",
-        "信贷",
-        "存款",
-        "LPR",
-        "社融"
+        "水泥",
+        "熟料",
+        "水泥价格",
+        "基建水泥"
       ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
     },
     {
-      "code": "BK0427",
-      "name": "公用事业",
+      "code": "BK0428",
+      "name": "电力",
+      "parent": "公用事业",
+      "sw_code": "801161",
       "keywords": [
         "电力",
         "电价",
         "火电",
-        "绿电",
-        "上网电价",
+        "水电",
         "核电",
-        "水务",
-        "燃气",
-        "供热"
+        "用电量",
+        "上网电价"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1205",
-      "name": "机械设备",
+      "code": "BK0440",
+      "name": "家居用品",
+      "parent": "轻工制造",
+      "sw_code": "801142",
       "keywords": [
-        "机床",
-        "工业母机",
-        "机器人",
-        "减速器",
-        "丝杠",
-        "工程机械",
-        "锂电设备",
-        "半导体设备",
-        "光伏设备",
-        "自动化"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK1207",
-      "name": "计算机",
-      "keywords": [
-        "算力",
-        "服务器",
-        "IDC",
-        "液冷",
-        "信创",
-        "SaaS",
-        "人工智能",
-        "大模型",
-        "国产替代",
-        "数据要素"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK0464",
-      "name": "石油石化",
-      "keywords": [
-        "原油",
-        "油价",
-        "OPEC",
-        "炼化",
-        "成品油",
-        "天然气",
-        "油服"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK1216",
-      "name": "医药生物",
-      "keywords": [
-        "创新药",
-        "集采",
-        "仿制药",
-        "临床",
-        "获批",
-        "医保",
-        "医疗器械",
-        "IVD",
-        "CXO",
-        "疫苗",
-        "中药"
-      ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.42
-    },
-    {
-      "code": "BK1204",
-      "name": "国防军工",
-      "keywords": [
-        "军工",
-        "国防",
-        "装备采购",
-        "导弹",
-        "商业航天",
-        "卫星",
-        "火箭",
-        "低空经济",
-        "大飞机",
-        "军贸"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK0438",
-      "name": "食品饮料",
-      "keywords": [
-        "白酒",
-        "酒企",
-        "批价",
-        "动销",
-        "调味品",
-        "乳业",
-        "零食",
-        "饮料"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK1035",
-      "name": "美容护理",
-      "keywords": [
-        "化妆品",
-        "医美",
-        "日化",
-        "个护"
-      ],
-      "clearing_stage": "未出清",
-      "clearing_score": 0.5
-    },
-    {
-      "code": "BK1212",
-      "name": "轻工制造",
-      "keywords": [
-        "造纸",
-        "纸浆",
-        "包装",
         "家居",
-        "瓷砖",
-        "文体用品"
+        "家具",
+        "定制家居",
+        "家居出口"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK0486",
-      "name": "传媒",
+      "code": "BK0448",
+      "name": "通信设备",
+      "parent": "通信",
+      "sw_code": "801102",
       "keywords": [
-        "影视",
-        "院线",
-        "票房",
-        "游戏",
-        "版号",
-        "短剧",
-        "广告",
-        "传媒",
-        "出版"
+        "通信设备",
+        "光模块",
+        "光通信",
+        "算力网络",
+        "交换机",
+        "CPO",
+        "海缆"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.45
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1211",
-      "name": "汽车",
+      "code": "BK0450",
+      "name": "航运港口",
+      "parent": "交通运输",
+      "sw_code": "801992",
       "keywords": [
-        "整车",
-        "新能源车",
-        "汽车销量",
-        "车企",
-        "价格战",
-        "智能驾驶",
-        "激光雷达",
-        "线控",
-        "三电",
-        "汽配"
+        "航运",
+        "集运",
+        "干散货",
+        "油运",
+        "港口",
+        "运价指数",
+        "波罗的海"
       ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.4
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1208",
-      "name": "建筑材料",
-      "keywords": [
-        "水泥",
-        "玻璃",
-        "玻纤",
-        "瓷砖",
-        "防水",
-        "建材"
-      ],
-      "clearing_stage": "出清中",
-      "clearing_score": 0.4
-    },
-    {
-      "code": "BK1202",
-      "name": "房地产",
+      "code": "BK0451",
+      "name": "房地产开发",
+      "parent": "房地产",
+      "sw_code": "801181",
       "keywords": [
         "房地产",
         "地产",
-        "房价",
-        "拿地",
         "销售面积",
-        "保交楼",
-        "楼市"
+        "房价",
+        "楼市",
+        "限购"
       ],
       "clearing_stage": "出清中",
-      "clearing_score": 0.3
+      "clearing_score": 0.3,
+      "blacklisted": true
     },
     {
-      "code": "BK0728",
-      "name": "环保",
+      "code": "BK0454",
+      "name": "塑料",
+      "parent": "基础化工",
+      "sw_code": "801036",
+      "keywords": [
+        "塑料",
+        "改性塑料",
+        "农膜",
+        "可降解塑料"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0457",
+      "name": "电网设备",
+      "parent": "电力设备",
+      "sw_code": "801738",
+      "keywords": [
+        "电网",
+        "特高压",
+        "输配电",
+        "智能电表",
+        "变压器",
+        "电网投资"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0459",
+      "name": "元件",
+      "parent": "电子",
+      "sw_code": "801083",
+      "keywords": [
+        "电子元件",
+        "PCB",
+        "覆铜板",
+        "被动元件",
+        "MLCC"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0465",
+      "name": "化学制药",
+      "parent": "医药生物",
+      "sw_code": "801151",
+      "keywords": [
+        "化学制药",
+        "仿制药",
+        "原料药",
+        "创新药",
+        "集采",
+        "一致性评价"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0471",
+      "name": "化学纤维",
+      "parent": "基础化工",
+      "sw_code": "801032",
+      "keywords": [
+        "化纤",
+        "涤纶",
+        "粘胶",
+        "氨纶",
+        "锦纶"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0473",
+      "name": "证券Ⅱ",
+      "parent": "非银金融",
+      "sw_code": "801193",
+      "keywords": [
+        "券商",
+        "证券",
+        "成交额",
+        "两融",
+        "并购重组",
+        "投行"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0474",
+      "name": "保险Ⅱ",
+      "parent": "非银金融",
+      "sw_code": "801194",
+      "keywords": [
+        "保险",
+        "保费",
+        "寿险",
+        "险资",
+        "预定利率"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0476",
+      "name": "装修建材",
+      "parent": "建筑材料",
+      "sw_code": "801713",
+      "keywords": [
+        "建材",
+        "防水",
+        "管材",
+        "石膏板",
+        "涂料"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0481",
+      "name": "汽车零部件",
+      "parent": "汽车",
+      "sw_code": "801093",
+      "keywords": [
+        "汽车零部件",
+        "汽配",
+        "一体化压铸",
+        "热管理",
+        "座椅"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0482",
+      "name": "一般零售",
+      "parent": "商贸零售",
+      "sw_code": "801203",
+      "keywords": [
+        "零售",
+        "商超",
+        "百货",
+        "超市",
+        "社零"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0484",
+      "name": "贸易Ⅱ",
+      "parent": "商贸零售",
+      "sw_code": "801202",
+      "keywords": [
+        "贸易",
+        "大宗贸易",
+        "供应链服务"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0538",
+      "name": "化学制品",
+      "parent": "基础化工",
+      "sw_code": "801034",
+      "keywords": [
+        "化工制品",
+        "涂料",
+        "染料",
+        "添加剂",
+        "胶粘剂",
+        "民爆"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0539",
+      "name": "综合Ⅱ",
+      "parent": "综合",
+      "sw_code": "801231",
+      "keywords": [
+        "综合",
+        "多元化"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0545",
+      "name": "通用设备",
+      "parent": "机械设备",
+      "sw_code": "801072",
+      "keywords": [
+        "通用设备",
+        "机床",
+        "工业母机",
+        "刀具",
+        "泵阀"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0546",
+      "name": "玻璃玻纤",
+      "parent": "建筑材料",
+      "sw_code": "801712",
+      "keywords": [
+        "玻璃",
+        "玻纤",
+        "浮法玻璃",
+        "光伏玻璃"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0725",
+      "name": "装修装饰Ⅱ",
+      "parent": "建筑装饰",
+      "sw_code": "801722",
+      "keywords": [
+        "装修",
+        "装饰",
+        "建筑装饰",
+        "家装"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0726",
+      "name": "工程咨询服务Ⅱ",
+      "parent": "建筑装饰",
+      "sw_code": "801726",
+      "keywords": [
+        "工程咨询",
+        "勘察设计",
+        "设计院"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0727",
+      "name": "医疗服务",
+      "parent": "医药生物",
+      "sw_code": "801156",
+      "keywords": [
+        "医疗服务",
+        "眼科",
+        "口腔",
+        "体检",
+        "民营医院"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0731",
+      "name": "农化制品",
+      "parent": "基础化工",
+      "sw_code": "801038",
+      "keywords": [
+        "农药",
+        "化肥",
+        "复合肥",
+        "磷肥",
+        "草甘膦"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0732",
+      "name": "贵金属",
+      "parent": "有色金属",
+      "sw_code": "801053",
+      "keywords": [
+        "黄金",
+        "白银",
+        "金价",
+        "美联储降息",
+        "金矿"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0734",
+      "name": "饰品",
+      "parent": "纺织服饰",
+      "sw_code": "801133",
+      "keywords": [
+        "黄金珠宝",
+        "珠宝",
+        "饰品",
+        "金饰"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0735",
+      "name": "计算机设备",
+      "parent": "计算机",
+      "sw_code": "801101",
+      "keywords": [
+        "计算机设备",
+        "服务器",
+        "存储",
+        "国产化"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0736",
+      "name": "通信服务",
+      "parent": "通信",
+      "sw_code": "801223",
+      "keywords": [
+        "运营商",
+        "通信服务",
+        "流量",
+        "5G套餐"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0737",
+      "name": "软件开发",
+      "parent": "计算机",
+      "sw_code": "801104",
+      "keywords": [
+        "软件",
+        "SaaS",
+        "工业软件",
+        "AI应用",
+        "大模型"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0738",
+      "name": "多元金融",
+      "parent": "非银金融",
+      "sw_code": "801191",
+      "keywords": [
+        "多元金融",
+        "期货",
+        "信托",
+        "租赁",
+        "创投"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0739",
+      "name": "工程机械",
+      "parent": "机械设备",
+      "sw_code": "801077",
+      "keywords": [
+        "工程机械",
+        "挖掘机",
+        "起重机",
+        "叉车",
+        "装载机"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0740",
+      "name": "教育",
+      "parent": "社会服务",
+      "sw_code": "801994",
+      "keywords": [
+        "教育",
+        "职业教育",
+        "教培",
+        "在线教育"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK0910",
+      "name": "专用设备",
+      "parent": "机械设备",
+      "sw_code": "801074",
+      "keywords": [
+        "专用设备",
+        "锂电设备",
+        "半导体设备",
+        "光伏设备"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1015",
+      "name": "能源金属",
+      "parent": "有色金属",
+      "sw_code": "801056",
+      "keywords": [
+        "锂",
+        "钴",
+        "镍",
+        "碳酸锂",
+        "锂矿",
+        "锂盐"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1016",
+      "name": "汽车服务",
+      "parent": "汽车",
+      "sw_code": "801092",
+      "keywords": [
+        "汽车服务",
+        "汽车经销",
+        "二手车"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1018",
+      "name": "橡胶",
+      "parent": "基础化工",
+      "sw_code": "801037",
+      "keywords": [
+        "橡胶",
+        "轮胎",
+        "天然橡胶",
+        "炭黑"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1019",
+      "name": "化学原料",
+      "parent": "基础化工",
+      "sw_code": "801033",
+      "keywords": [
+        "纯碱",
+        "氯碱",
+        "烧碱",
+        "无机盐",
+        "煤化工",
+        "钛白粉"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1020",
+      "name": "非金属材料Ⅱ",
+      "parent": "基础化工",
+      "sw_code": "801039",
+      "keywords": [
+        "非金属材料",
+        "碳纤维",
+        "玻纤",
+        "石英砂"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1027",
+      "name": "小金属",
+      "parent": "有色金属",
+      "sw_code": "801054",
+      "keywords": [
+        "稀土",
+        "钨",
+        "钼",
+        "锑",
+        "锗",
+        "小金属"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1028",
+      "name": "燃气Ⅱ",
+      "parent": "公用事业",
+      "sw_code": "801163",
+      "keywords": [
+        "燃气",
+        "天然气",
+        "LNG",
+        "管道气",
+        "城燃"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1030",
+      "name": "电机Ⅱ",
+      "parent": "电力设备",
+      "sw_code": "801731",
+      "keywords": [
+        "电机",
+        "微特电机",
+        "永磁电机"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1031",
+      "name": "光伏设备",
+      "parent": "电力设备",
+      "sw_code": "801735",
+      "keywords": [
+        "光伏",
+        "硅料",
+        "硅片",
+        "组件",
+        "电池片",
+        "逆变器",
+        "光伏装机",
+        "反内卷"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1032",
+      "name": "风电设备",
+      "parent": "电力设备",
+      "sw_code": "801736",
+      "keywords": [
+        "风电",
+        "海上风电",
+        "风机",
+        "塔筒",
+        "风电装机"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1033",
+      "name": "电池",
+      "parent": "电力设备",
+      "sw_code": "801737",
+      "keywords": [
+        "锂电池",
+        "动力电池",
+        "储能电池",
+        "固态电池",
+        "负极",
+        "正极",
+        "电解液",
+        "隔膜"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1034",
+      "name": "其他电源设备Ⅱ",
+      "parent": "电力设备",
+      "sw_code": "801733",
+      "keywords": [
+        "电源设备",
+        "储能",
+        "充电桩",
+        "氢能",
+        "燃料电池"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1036",
+      "name": "半导体",
+      "parent": "电子",
+      "sw_code": "801081",
+      "keywords": [
+        "半导体",
+        "芯片",
+        "晶圆",
+        "封测",
+        "存储芯片",
+        "光刻",
+        "国产替代",
+        "先进制程",
+        "EDA"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1037",
+      "name": "消费电子",
+      "parent": "电子",
+      "sw_code": "801085",
+      "keywords": [
+        "消费电子",
+        "手机产业链",
+        "苹果链",
+        "折叠屏",
+        "AI手机",
+        "智能穿戴"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1038",
+      "name": "光学光电子",
+      "parent": "电子",
+      "sw_code": "801084",
+      "keywords": [
+        "面板",
+        "OLED",
+        "LED",
+        "光学",
+        "镜头",
+        "显示"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1039",
+      "name": "电子化学品Ⅱ",
+      "parent": "电子",
+      "sw_code": "801086",
+      "keywords": [
+        "电子化学品",
+        "光刻胶",
+        "电子气体",
+        "湿电子化学品"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1040",
+      "name": "中药Ⅱ",
+      "parent": "医药生物",
+      "sw_code": "801155",
+      "keywords": [
+        "中药",
+        "中药材",
+        "中成药",
+        "配方颗粒"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1041",
+      "name": "医疗器械",
+      "parent": "医药生物",
+      "sw_code": "801153",
+      "keywords": [
+        "医疗器械",
+        "医疗设备",
+        "医学影像",
+        "耗材",
+        "器械集采"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1042",
+      "name": "医药商业",
+      "parent": "医药生物",
+      "sw_code": "801154",
+      "keywords": [
+        "医药商业",
+        "药店",
+        "医药流通",
+        "连锁药房"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1043",
+      "name": "专业服务",
+      "parent": "社会服务",
+      "sw_code": "801218",
+      "keywords": [
+        "专业服务",
+        "人力资源",
+        "检测服务",
+        "会展"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1044",
+      "name": "生物制品",
+      "parent": "医药生物",
+      "sw_code": "801152",
+      "keywords": [
+        "生物制品",
+        "疫苗",
+        "血制品",
+        "生长激素",
+        "单抗"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.42,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1045",
+      "name": "房地产服务",
+      "parent": "房地产",
+      "sw_code": "801183",
+      "keywords": [
+        "物业管理",
+        "房产中介",
+        "房地产服务"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.3,
+      "blacklisted": true
+    },
+    {
+      "code": "BK1046",
+      "name": "游戏Ⅱ",
+      "parent": "传媒",
+      "sw_code": "801764",
+      "keywords": [
+        "游戏",
+        "手游",
+        "版号",
+        "电竞",
+        "页游"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1218",
+      "name": "出版",
+      "parent": "传媒",
+      "sw_code": "801769",
+      "keywords": [
+        "出版",
+        "图书",
+        "教材",
+        "版权"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1219",
+      "name": "电视广播Ⅱ",
+      "parent": "传媒",
+      "sw_code": "801995",
+      "keywords": [
+        "电视",
+        "广播",
+        "广电",
+        "有线电视"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1220",
+      "name": "广告营销",
+      "parent": "传媒",
+      "sw_code": "801765",
+      "keywords": [
+        "广告",
+        "营销",
+        "投放",
+        "梯媒",
+        "楼宇广告"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1221",
+      "name": "数字媒体",
+      "parent": "传媒",
+      "sw_code": "801767",
+      "keywords": [
+        "数字媒体",
+        "视频平台",
+        "在线视频",
+        "短视频",
+        "流媒体"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1222",
+      "name": "影视院线",
+      "parent": "传媒",
+      "sw_code": "801766",
+      "keywords": [
+        "影视",
+        "电影",
+        "院线",
+        "票房",
+        "剧集",
+        "内容"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1223",
+      "name": "其他电子Ⅱ",
+      "parent": "电子",
+      "sw_code": "801082",
+      "keywords": [
+        "电子",
+        "电子制造"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.55,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1224",
+      "name": "纺织制造",
+      "parent": "纺织服饰",
+      "sw_code": "801131",
+      "keywords": [
+        "纺织制造",
+        "棉纺",
+        "面料",
+        "印染",
+        "纺织订单"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1225",
+      "name": "服装家纺",
+      "parent": "纺织服饰",
+      "sw_code": "801132",
+      "keywords": [
+        "服装",
+        "家纺",
+        "纺织服装",
+        "品牌服饰",
+        "运动鞋服"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1226",
+      "name": "普钢",
+      "parent": "钢铁",
+      "sw_code": "801044",
+      "keywords": [
+        "钢铁",
+        "螺纹钢",
+        "钢价",
+        "粗钢",
+        "板材",
+        "限产"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.3,
+      "blacklisted": true
+    },
+    {
+      "code": "BK1227",
+      "name": "特钢Ⅱ",
+      "parent": "钢铁",
+      "sw_code": "801045",
+      "keywords": [
+        "特钢",
+        "高端特钢",
+        "高温合金",
+        "不锈钢"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.3,
+      "blacklisted": true
+    },
+    {
+      "code": "BK1228",
+      "name": "冶钢原料",
+      "parent": "钢铁",
+      "sw_code": "801043",
+      "keywords": [
+        "铁矿石",
+        "焦煤",
+        "冶金原料",
+        "废钢"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.3,
+      "blacklisted": true
+    },
+    {
+      "code": "BK1229",
+      "name": "地面兵装Ⅱ",
+      "parent": "国防军工",
+      "sw_code": "801743",
+      "keywords": [
+        "地面兵装",
+        "装甲",
+        "陆军装备"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1230",
+      "name": "航海装备Ⅱ",
+      "parent": "国防军工",
+      "sw_code": "801744",
+      "keywords": [
+        "航海装备",
+        "船舶",
+        "军舰",
+        "航母",
+        "造船"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1231",
+      "name": "航空装备Ⅱ",
+      "parent": "国防军工",
+      "sw_code": "801742",
+      "keywords": [
+        "航空装备",
+        "战机",
+        "航空发动机",
+        "无人机",
+        "大飞机"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1232",
+      "name": "航天装备Ⅱ",
+      "parent": "国防军工",
+      "sw_code": "801741",
+      "keywords": [
+        "航天",
+        "卫星",
+        "火箭",
+        "商业航天",
+        "北斗"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1233",
+      "name": "军工电子Ⅱ",
+      "parent": "国防军工",
+      "sw_code": "801745",
+      "keywords": [
+        "军工电子",
+        "雷达",
+        "电子对抗",
+        "军用芯片"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1234",
+      "name": "环保设备Ⅱ",
+      "parent": "环保",
+      "sw_code": "801972",
+      "keywords": [
+        "环保设备",
+        "环卫装备",
+        "尾气治理"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1235",
+      "name": "环境治理",
+      "parent": "环保",
+      "sw_code": "801971",
       "keywords": [
         "环保",
-        "污水",
+        "污水治理",
         "固废",
-        "碳交易",
-        "危废",
-        "再生资源"
+        "垃圾焚烧",
+        "水务"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK0436",
-      "name": "纺织服饰",
+      "code": "BK1236",
+      "name": "轨交设备Ⅱ",
+      "parent": "机械设备",
+      "sw_code": "801076",
       "keywords": [
-        "纺织",
-        "服装",
-        "棉花",
-        "品牌服饰",
-        "棉价"
+        "轨交",
+        "动车组",
+        "地铁",
+        "铁路装备"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1209",
-      "name": "建筑装饰",
+      "code": "BK1237",
+      "name": "自动化设备",
+      "parent": "机械设备",
+      "sw_code": "801078",
       "keywords": [
-        "建筑",
+        "自动化",
+        "工业机器人",
+        "减速器",
+        "工控",
+        "数控",
+        "丝杠"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1238",
+      "name": "IT服务Ⅱ",
+      "parent": "计算机",
+      "sw_code": "801103",
+      "keywords": [
+        "IT服务",
+        "系统集成",
+        "云计算",
+        "信创",
+        "数据中心"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1239",
+      "name": "白色家电",
+      "parent": "家用电器",
+      "sw_code": "801111",
+      "keywords": [
+        "白电",
+        "空调",
+        "冰箱",
+        "洗衣机",
+        "家电下乡"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1240",
+      "name": "厨卫电器",
+      "parent": "家用电器",
+      "sw_code": "801114",
+      "keywords": [
+        "厨电",
+        "油烟机",
+        "燃气灶",
+        "集成灶"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1241",
+      "name": "黑色家电",
+      "parent": "家用电器",
+      "sw_code": "801112",
+      "keywords": [
+        "黑电",
+        "彩电",
+        "电视",
+        "面板"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1242",
+      "name": "家电零部件Ⅱ",
+      "parent": "家用电器",
+      "sw_code": "801116",
+      "keywords": [
+        "家电零部件",
+        "压缩机",
+        "电机"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1244",
+      "name": "小家电",
+      "parent": "家用电器",
+      "sw_code": "801113",
+      "keywords": [
+        "小家电",
+        "扫地机器人",
+        "空气炸锅",
+        "个护小电"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1245",
+      "name": "照明设备Ⅱ",
+      "parent": "家用电器",
+      "sw_code": "801115",
+      "keywords": [
+        "照明",
+        "LED",
+        "灯具",
+        "智能照明"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.8,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1246",
+      "name": "房屋建设Ⅱ",
+      "parent": "建筑装饰",
+      "sw_code": "801721",
+      "keywords": [
+        "房建",
+        "建筑工程",
+        "施工"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1247",
+      "name": "基础建设",
+      "parent": "建筑装饰",
+      "sw_code": "801723",
+      "keywords": [
         "基建",
-        "工程",
-        "城投",
-        "新签订单",
-        "专项债"
+        "基础设施建设",
+        "专项债",
+        "重大项目"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1214",
-      "name": "社会服务",
+      "code": "BK1248",
+      "name": "专业工程",
+      "parent": "建筑装饰",
+      "sw_code": "801724",
       "keywords": [
-        "旅游",
-        "酒店",
-        "出行",
-        "客流",
-        "教育",
-        "人力资源",
-        "餐饮"
+        "专业工程",
+        "钢结构",
+        "化学工程",
+        "冶金工程"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK0433",
-      "name": "农林牧渔",
+      "code": "BK1249",
+      "name": "焦炭Ⅱ",
+      "parent": "煤炭",
+      "sw_code": "801952",
+      "keywords": [
+        "焦炭",
+        "焦煤",
+        "炼焦"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.85,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1250",
+      "name": "煤炭开采",
+      "parent": "煤炭",
+      "sw_code": "801951",
+      "keywords": [
+        "煤炭",
+        "动力煤",
+        "煤价",
+        "电煤",
+        "长协价"
+      ],
+      "clearing_stage": "已出清",
+      "clearing_score": 0.85,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1251",
+      "name": "个护用品",
+      "parent": "美容护理",
+      "sw_code": "801981",
+      "keywords": [
+        "个护",
+        "洗护",
+        "卫生用品",
+        "纸尿裤"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1252",
+      "name": "化妆品",
+      "parent": "美容护理",
+      "sw_code": "801982",
+      "keywords": [
+        "化妆品",
+        "美妆",
+        "国货美妆",
+        "护肤"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1254",
+      "name": "动物保健Ⅱ",
+      "parent": "农林牧渔",
+      "sw_code": "801018",
+      "keywords": [
+        "动物保健",
+        "兽药",
+        "动物疫苗",
+        "宠物"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1256",
+      "name": "农产品加工",
+      "parent": "农林牧渔",
+      "sw_code": "801012",
+      "keywords": [
+        "农产品加工",
+        "粮油",
+        "压榨",
+        "食糖",
+        "大豆"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1258",
+      "name": "饲料",
+      "parent": "农林牧渔",
+      "sw_code": "801014",
+      "keywords": [
+        "饲料",
+        "豆粕",
+        "饲料添加剂",
+        "水产饲料"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1259",
+      "name": "养殖业",
+      "parent": "农林牧渔",
+      "sw_code": "801017",
       "keywords": [
         "生猪",
         "猪肉",
         "猪价",
         "能繁母猪",
         "养殖",
-        "种业",
-        "转基因",
-        "饲料",
-        "粮食",
-        "农业"
+        "鸡价",
+        "白羽鸡"
       ],
       "clearing_stage": "出清中",
-      "clearing_score": 0.45
+      "clearing_score": 0.45,
+      "blacklisted": false
     },
     {
-      "code": "BK1217",
-      "name": "综合",
+      "code": "BK1260",
+      "name": "渔业",
+      "parent": "农林牧渔",
+      "sw_code": "801015",
       "keywords": [
-        "综合"
+        "渔业",
+        "水产",
+        "海洋牧场",
+        "捕捞",
+        "水产养殖"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1261",
+      "name": "种植业",
+      "parent": "农林牧渔",
+      "sw_code": "801016",
+      "keywords": [
+        "种业",
+        "转基因",
+        "种子",
+        "粮食",
+        "玉米",
+        "小麦"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.45,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1262",
+      "name": "乘用车",
+      "parent": "汽车",
+      "sw_code": "801095",
+      "keywords": [
+        "乘用车",
+        "整车",
+        "新能源车",
+        "汽车销量",
+        "以旧换新"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1263",
+      "name": "摩托车及其他",
+      "parent": "汽车",
+      "sw_code": "801881",
+      "keywords": [
+        "摩托车",
+        "两轮车",
+        "电动两轮"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1264",
+      "name": "商用车",
+      "parent": "汽车",
+      "sw_code": "801096",
+      "keywords": [
+        "商用车",
+        "重卡",
+        "卡车",
+        "客车"
+      ],
+      "clearing_stage": "出清中",
+      "clearing_score": 0.4,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1265",
+      "name": "包装印刷",
+      "parent": "轻工制造",
+      "sw_code": "801141",
+      "keywords": [
+        "包装",
+        "印刷",
+        "纸包装",
+        "金属包装"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
     },
     {
-      "code": "BK1213",
-      "name": "商贸零售",
+      "code": "BK1266",
+      "name": "文娱用品",
+      "parent": "轻工制造",
+      "sw_code": "801145",
       "keywords": [
-        "零售",
-        "百货",
-        "社零",
-        "消费复苏",
+        "文娱用品",
+        "玩具",
+        "文具",
+        "潮玩"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1267",
+      "name": "造纸",
+      "parent": "轻工制造",
+      "sw_code": "801143",
+      "keywords": [
+        "造纸",
+        "纸浆",
+        "文化纸",
+        "白卡纸"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1268",
+      "name": "互联网电商",
+      "parent": "商贸零售",
+      "sw_code": "801206",
+      "keywords": [
+        "电商",
+        "互联网电商",
+        "直播电商",
         "跨境电商",
-        "免税"
+        "拼多多"
       ],
       "clearing_stage": "未出清",
-      "clearing_score": 0.5
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1270",
+      "name": "专业连锁Ⅱ",
+      "parent": "商贸零售",
+      "sw_code": "801204",
+      "keywords": [
+        "专业连锁",
+        "连锁",
+        "门店扩张"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1271",
+      "name": "酒店餐饮",
+      "parent": "社会服务",
+      "sw_code": "801219",
+      "keywords": [
+        "酒店",
+        "餐饮",
+        "连锁餐饮",
+        "入住率",
+        "RevPAR"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1272",
+      "name": "旅游及景区",
+      "parent": "社会服务",
+      "sw_code": "801993",
+      "keywords": [
+        "旅游",
+        "景区",
+        "出行",
+        "客流",
+        "免签",
+        "假期"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1274",
+      "name": "炼化及贸易",
+      "parent": "石油石化",
+      "sw_code": "801963",
+      "keywords": [
+        "炼化",
+        "炼油",
+        "石化",
+        "成品油",
+        "乙烯"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1275",
+      "name": "油服工程",
+      "parent": "石油石化",
+      "sw_code": "801962",
+      "keywords": [
+        "油服",
+        "石油工程",
+        "钻井",
+        "压裂",
+        "油田服务"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1277",
+      "name": "白酒Ⅱ",
+      "parent": "食品饮料",
+      "sw_code": "801125",
+      "keywords": [
+        "白酒",
+        "茅台",
+        "高端白酒",
+        "批价",
+        "动销",
+        "酒企"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1278",
+      "name": "调味发酵品Ⅱ",
+      "parent": "食品饮料",
+      "sw_code": "801129",
+      "keywords": [
+        "调味品",
+        "酱油",
+        "酵母",
+        "复合调味"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1279",
+      "name": "非白酒",
+      "parent": "食品饮料",
+      "sw_code": "801126",
+      "keywords": [
+        "啤酒",
+        "葡萄酒",
+        "黄酒",
+        "预调酒"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1280",
+      "name": "食品加工",
+      "parent": "食品饮料",
+      "sw_code": "801124",
+      "keywords": [
+        "食品加工",
+        "速冻食品",
+        "肉制品",
+        "预制菜"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1281",
+      "name": "休闲食品",
+      "parent": "食品饮料",
+      "sw_code": "801128",
+      "keywords": [
+        "休闲食品",
+        "零食",
+        "量贩零食",
+        "坚果"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1282",
+      "name": "饮料乳品",
+      "parent": "食品饮料",
+      "sw_code": "801127",
+      "keywords": [
+        "乳制品",
+        "饮料",
+        "液态奶",
+        "原奶",
+        "功能性饮料"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1287",
+      "name": "工业金属",
+      "parent": "有色金属",
+      "sw_code": "801055",
+      "keywords": [
+        "铜",
+        "铝",
+        "电解铝",
+        "锌",
+        "铅",
+        "铜价"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
+    },
+    {
+      "code": "BK1288",
+      "name": "金属新材料",
+      "parent": "有色金属",
+      "sw_code": "801051",
+      "keywords": [
+        "金属新材料",
+        "磁材",
+        "靶材",
+        "高温合金"
+      ],
+      "clearing_stage": "未出清",
+      "clearing_score": 0.5,
+      "blacklisted": false
     }
   ],
   "blacklist": [

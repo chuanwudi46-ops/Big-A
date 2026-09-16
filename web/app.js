@@ -340,9 +340,131 @@ function renderDetail(d) {
   </section>`;
 }
 
+/* ================= 大盘关键位（周线 / 月线 / 年线） =================
+   数据来自 levels.json。压力位取「现价上方最近的摆动前高」，
+   支撑位取「现价下方最近的摆动前低」—— 已经被突破的位置没有参考价值，
+   所以后端只会返回对应方向的档位。
+   ================================================================= */
+
+function fmtPct(v, digits = 2) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(digits) + '%';
+}
+
+/** 位置分位 → 色档。高位偏红、低位偏绿，与 A 股涨跌配色一致 */
+function posClass(p) {
+  if (p == null || !Number.isFinite(p)) return '';
+  if (p >= 0.66) return 'hi';
+  if (p >= 0.33) return 'mid';
+  return 'lo';
+}
+
+function levelCell(x, kind) {
+  if (!x) return `<span class="lv-none">${kind === 'res' ? '上方无压力' : '下方无支撑'}</span>`;
+  return `<span class="lv-${kind}${x.near ? ' near' : ''}">${x.price.toFixed(2)}`
+    + `<i>${fmtPct(x.gap_pct)}</i></span>`;
+}
+
+function renderLevels(lv, sel = 0) {
+  if (!lv || !lv.indices || !lv.indices.length) return '';
+  const i = Math.min(Math.max(sel, 0), lv.indices.length - 1);
+  const I = lv.indices[i];
+
+  const seg = lv.indices.length > 1
+    ? `<div class="seg" id="idxSeg">${lv.indices.map((x, k) =>
+        `<button data-i="${k}" class="${k === i ? 'on' : ''}">${x.name}</button>`).join('')}</div>`
+    : '';
+
+  const rows = I.periods.map((p) => `<div class="lv-row">
+      <b>${p.label}</b>${levelCell(p.resistance[0], 'res')}${levelCell(p.support[0], 'sup')}
+    </div>`).join('');
+
+  const posLine = I.periods.map((p) => `<span><b>${p.label}</b>`
+    + `${p.position == null ? '—' : (p.position * 100).toFixed(0) + '%'}`
+    + `<em>${p.position_text || ''}</em></span>`).join('');
+
+  const notes = (I.summary?.notes || []).map((n) => `<li>${n}</li>`).join('');
+
+  const all = I.periods.map((p) => `<div class="lv-allp">
+      <b>${p.label}<em>${p.bars} 根</em></b>
+      <div><span>压力</span>${p.resistance.map((x) => x.price.toFixed(0)).join(' / ') || '—'}</div>
+      <div><span>支撑</span>${p.support.map((x) => x.price.toFixed(0)).join(' / ') || '—'}</div>
+    </div>`).join('');
+
+  return `<section class="card lv">
+    <div class="lv-head"><h3>大盘关键位</h3>${seg}</div>
+    <p class="lv-quote"><b>${I.name}</b><span class="lv-close">${I.close}</span>
+      <em class="${(I.pct ?? 0) >= 0 ? 'up' : 'dn'}">${fmtPct(I.pct)}</em>
+      <span class="lv-date">${I.date}</span></p>
+    <div class="lv-grid">
+      <div class="lv-row lv-th"><b></b><span>压力位</span><span>支撑位</span></div>
+      ${rows}
+    </div>
+    <p class="lv-pos">${posLine}</p>
+    ${I.summary?.text ? `<p class="lv-sum">${I.summary.text}</p>` : ''}
+    ${notes ? `<ul class="lv-notes">${notes}</ul>` : ''}
+    <details class="lv-more"><summary>全部档位</summary>${all}</details>
+  </section>`;
+}
+
+/* ==================== 回撤 / 涨幅列表 ==================== */
+
+const SWING_WIN = [['20', '20 日'], ['60', '60 日'], ['250', '近一年']];
+
+const SWING_SORTS = {
+  dd: ['回撤深 → 浅', (a, b) => (a.dd ?? 0) - (b.dd ?? 0)],
+  rb: ['反弹大 → 小', (a, b) => (b.rb ?? 0) - (a.rb ?? 0)],
+  pos: ['位置低 → 高', (a, b) => (a.pos ?? 2) - (b.pos ?? 2)],
+  score: ['评分高 → 低', (a, b) => (b.score ?? 0) - (a.score ?? 0)],
+};
+
+function swingRows(win) {
+  return state.idx.map((b) => {
+    const w = (b.swing || {})[String(win)] || {};
+    return { code: b.code, name: b.name, parent: b.parent || '',
+             score: b.score, dd: w.dd, rb: w.rb, pos: w.pos, dsh: w.dsh };
+  }).filter((r) => r.dd != null || r.rb != null);
+}
+
+function renderSwingList() {
+  const win = String(state.win);
+  const cmp = SWING_SORTS[state.sort][1];
+  const rows = swingRows(win).sort(cmp);
+
+  const winSeg = SWING_WIN.map(([k, lb]) =>
+    `<button data-w="${k}" class="${win === k ? 'on' : ''}">${lb}</button>`).join('');
+  const sortSeg = Object.entries(SWING_SORTS).map(([k, [lb]]) =>
+    `<button data-s="${k}" class="${state.sort === k ? 'on' : ''}">${lb}</button>`).join('');
+
+  const items = rows.map((r) => `<button class="srow" data-code="${r.code}">
+      <span class="snm">${r.name}${r.parent ? `<em>${r.parent}</em>` : ''}</span>
+      <span class="sval dd">${r.dd == null ? '—' : fmtPct(r.dd * 100, 1)}</span>
+      <span class="sval rb">${r.rb == null ? '—' : fmtPct(r.rb * 100, 1)}</span>
+      <span class="sbar"><i class="${posClass(r.pos)}"
+        style="width:${r.pos == null ? 0 : (r.pos * 100).toFixed(0)}%"></i></span>
+    </button>`).join('');
+
+  return `<section class="card">
+    <h3>区间位置 · ${rows.length} 个板块</h3>
+    <div class="seg wrap" id="winSeg">${winSeg}</div>
+    <div class="seg wrap" id="sortSeg">${sortSeg}</div>
+    <div class="shead"><span>板块</span><span>距高点</span><span>距低点</span><span>位置</span></div>
+    <div class="slist">${items}</div>
+    <p class="src">「距高点」= 现价相对区间最高价（负值即回撤）；「距低点」= 现价相对区间最低价；
+      位置条为现价在区间中的分位，越靠右越高。点任意一行看板块详情。</p>
+  </section>`;
+}
+
 /* ============================== 主流程 ============================== */
 
-const state = { idx: [], meta: {}, selected: [], current: null, version: '' };
+const state = {
+  idx: [], meta: {}, selected: [], current: null, version: '',
+  view: 'score',      // score | swing
+  win: 250,           // 回撤/涨幅的统计窗口（交易日）
+  sort: 'dd',         // 回撤列表排序键
+  levels: null,       // 大盘关键位（levels.json）
+  idxSel: 0,          // 当前查看的指数下标
+};
 
 async function fetchJSON(path) {
   const r = await fetch(path, { cache: 'no-cache' });
@@ -359,15 +481,33 @@ async function loadDetail(code, version) {
   return d;
 }
 
+function paintLevels() {
+  $('#lvCard').innerHTML = renderLevels(state.levels, state.idxSel);
+}
+
+function syncTabs() {
+  document.querySelectorAll('#tabs button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.view === state.view));
+}
+
 async function renderCurrent() {
-  const main = $('#main');
+  $('#macro').innerHTML = renderMacroBar(state.meta);
+  paintLevels();
+
+  // 回撤 / 涨幅视图：只重绘列表，不加载任何板块详情
+  if (state.view === 'swing') {
+    $('#chips').hidden = true;
+    $('#body').innerHTML = renderSwingList();
+    return;
+  }
+  $('#chips').hidden = false;
+
   const code = state.current;
   if (!code) return;
 
   // 宏观卡与详情一起渲染，避免被后续 innerHTML 覆盖
-  const paint = (html) => { main.innerHTML = macroCard(state.meta) + html; };
+  const paint = (html) => { $('#body').innerHTML = macroCard(state.meta) + html; };
 
-  $('#macro').innerHTML = renderMacroBar(state.meta);
   $('#chips').innerHTML = renderChips(
     state.selected.map((c) => state.idx.find((b) => b.code === c)).filter(Boolean), code);
 
@@ -466,9 +606,19 @@ async function boot() {
   state.meta = meta;
   state.version = meta.updated || '';
 
+  // 大盘关键位：拿不到就整块隐藏，不能影响评分主流程
+  try {
+    state.levels = await fetchJSON(`${DATA}levels.json`);
+  } catch {
+    state.levels = null;
+  }
+
   demoBanner(meta);   // 合成演示数据必须显著标注，避免误当真数据
 
-  state.selected = ls(LS_SEL, []);
+  // 自选要按当前板块宇宙过滤：切换层级（如一级 31 → 二级 127）后，
+  // localStorage 里存的是旧代码，不过滤会出现「选中了但列表里找不到」
+  const valid = new Set(state.idx.map((b) => b.code));
+  state.selected = ls(LS_SEL, []).filter((c) => valid.has(c));
   if (!state.selected.length) {
     state.selected = state.idx.slice(0, 5).map((b) => b.code);
     lsSet(LS_SEL, state.selected);
@@ -477,6 +627,16 @@ async function boot() {
 
   // 在详情区顶部插入宏观卡（每次渲染前重建）
   bindSheet();
+  syncTabs();
+
+  $('#tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-view]');
+    if (!b) return;
+    state.view = b.dataset.view;
+    syncTabs();
+    renderCurrent();
+  });
+
   $('#chips').addEventListener('click', (e) => {
     if (e.target.closest('#btnManage')) { openSheet(); return; }
     const chip = e.target.closest('.chip');
@@ -484,6 +644,31 @@ async function boot() {
     state.current = chip.dataset.code;
     renderCurrent();
   });
+
+  // 回撤列表里的窗口 / 排序切换与行点击（委托到 #body，
+  // 因为列表内容每次重绘都会被替换，绑在子元素上会失效）
+  $('#body').addEventListener('click', (e) => {
+    const w = e.target.closest('#winSeg button');
+    if (w) { state.win = Number(w.dataset.w); renderCurrent(); return; }
+    const s = e.target.closest('#sortSeg button');
+    if (s) { state.sort = s.dataset.s; renderCurrent(); return; }
+    const row = e.target.closest('.srow');
+    if (row && row.dataset.code) {
+      state.current = row.dataset.code;   // 临时查看，不改动自选
+      state.view = 'score';
+      syncTabs();
+      renderCurrent();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
+
+  $('#lvCard').addEventListener('click', (e) => {
+    const b = e.target.closest('#idxSeg button');
+    if (!b) return;
+    state.idxSel = Number(b.dataset.i);
+    paintLevels();
+  });
+
   await renderCurrent();
 }
 

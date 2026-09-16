@@ -191,15 +191,19 @@ def _direct_board_snapshot() -> pd.DataFrame:
                if c in df.columns]]
 
 
-def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600) -> pd.DataFrame:
+def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600,
+                       attempts: int = 2) -> pd.DataFrame:
     """直连获取板块日 K 线。secid 形如 90.BK0475。
 
     按 KLINE_HOSTS 顺序容灾（push2delay 优先，见常量注释），并整体重试 2 轮。
     实测 runner 上偶发 RemoteDisconnected（同一 secid 重试即成功），单轮循环
     会让个别板块静默掉出评分（实测 30/31），故加一轮短退避重试。
+
+    `attempts` 可下调为 1：当上层已经确认「这不是抖动而是真没数据」时，
+    多轮重试只是白等超时（这个通道整体在部分网络下不可达）。
     """
     last_err: Exception | None = None
-    for attempt in range(2):
+    for attempt in range(max(1, attempts)):
         if attempt:
             time.sleep(2.5)
         for base in KLINE_HOSTS:
@@ -253,17 +257,43 @@ def _tencent_industry_map() -> dict[str, str]:
     return _tx_map
 
 
-def _tencent_board_hist(name: str, start: str, end: str, count: int = 800) -> pd.DataFrame:
-    """腾讯行情：申万一级行业指数日 K 线。
+class NoHistorySource(Exception):
+    """该板块在所有数据源都没有历史 K 线。
+
+    与「网络抖动」要严格区分：前者重试一百次也是空，必须立刻放弃，
+    否则每轮重试都要等超时 —— 127 个板块里只要有几个这种的，
+    整次 CI 就会被拖垮（实测曾卡在一个板块上几分钟）。
+    """
+
+
+def _tencent_board_code(name: str, sw_code: str | None = None) -> str | None:
+    """解析腾讯板块代码。
+
+    腾讯板块指数的代码规则是 `pt01` + **申万行业指数 6 位码**，例如
+    电子 = pt01801080、种植业 = pt01801012。关键点：**这套规则对申万二级
+    同样成立**，所以不必去猜 / 维护名称映射，直接用申万代码拼即可。
+
+    早期的做法是靠腾讯「行业」排行榜接口建立「名称 → 代码」映射，但那份
+    列表只覆盖申万一级 31 个（二级板块全部取不到），而且该接口本身还不稳定
+    （实测会返回 count=0）。所以现在以申万代码为准，名称映射只作兜底。
+    """
+    if sw_code:
+        return "pt01" + str(sw_code).split(".")[0]
+    return _tencent_industry_map().get(name) or None
+
+
+def _tencent_board_hist(name: str, start: str, end: str, count: int = 800,
+                        sw_code: str | None = None) -> pd.DataFrame:
+    """腾讯行情：申万行业指数日 K 线（一级 / 二级通用）。
 
     start/end 格式 YYYYMMDD（与本地包接口一致）。bar 字段位置经实测校准：
     [日期, 开, 收, 高, 低, 成交量(手), {}, 换手率%, 成交额(万元), ...]。
     涨跌幅不取腾讯的字段位置（不同品种长度不一），改用收盘价自行推算，
     为保证首根 bar 的涨跌幅正确，取数区间向前多留 15 个自然日再裁剪。
     """
-    code = _tencent_industry_map().get(name)
+    code = _tencent_board_code(name, sw_code)
     if not code:
-        raise RuntimeError(f"腾讯未收录该行业：{name}")
+        raise NoHistorySource(f"腾讯未收录该行业且无申万代码：{name}")
 
     def _iso(d: str) -> str:
         return f"{d[0:4]}-{d[4:6]}-{d[6:8]}"
@@ -275,8 +305,12 @@ def _tencent_board_hist(name: str, start: str, end: str, count: int = 800) -> pd
     r = _get(url, timeout=20)
     r.raise_for_status()
     bars = ((r.json().get("data") or {}).get(code) or {}).get("day") or []
+    if not bars:
+        # HTTP 200 但一根 K 线都没有 —— 这是「该代码在腾讯没有行情」，
+        # 不是网络问题，重试无意义
+        raise NoHistorySource(f"腾讯无 {name} 的 K 线（{code}）")
     if len(bars) < 30:
-        raise RuntimeError(f"腾讯 K 线不足（{name}：{len(bars)} 根）")
+        raise NoHistorySource(f"腾讯 {name} K 线过少（{len(bars)} 根，{code}）")
 
     def _f(v):
         try:
@@ -481,32 +515,44 @@ def board_snapshot() -> pd.DataFrame:
     return df
 
 
-def board_hist(name: str, start: str, end: str, code: str | None = None) -> pd.DataFrame:
-    """板块日 K 线。start/end 格式 YYYYMMDD；code 为东财板块代码（如 BK1201）。
+def board_hist(name: str, start: str, end: str, code: str | None = None,
+               sw_code: str | None = None) -> pd.DataFrame:
+    """板块日 K 线。start/end 格式 YYYYMMDD。
 
-    通道优先级：**腾讯（申万一级行业指数）→ 东财直连 → akshare**。
-    腾讯优先的三个理由：① 海内外均可达，不受东财分片域名封锁影响；
-    ② 31 个一级行业与 board_universe.json 同名，天然一一对应；
-    ③ 实测 31/31 全成功、总耗时约 3 秒，远快于 akshare 的逐块重试。
+    - `code`：东财板块代码（如 BK1201），用于直连兜底
+    - `sw_code`：申万行业指数 6 位码（如 801080），**腾讯主通道靠它**
+      —— 必须传，否则二级板块会因腾讯行业列表只有一级而全部取不到
+
+    通道优先级：**腾讯（申万行业指数）→ 东财直连 → akshare**。
+    腾讯优先的理由：① 海内外均可达，不受东财分片域名封锁影响；
+    ② 能用申万代码直连，一级 / 二级同一套规则；
+    ③ 实测 121/127 个二级板块成功、并发 6 只需 5 秒。
+
+    区分两种失败很关键：`NoHistorySource` 表示「腾讯压根没有这个板块的行情」，
+    此时后面的东财通道在多数网络下同样不可用，**直接返回空表**，
+    不再逐域名重试 —— 否则每个这样的板块都要白等一两分钟，把 CI 拖垮。
     """
     try:
-        df = _tencent_board_hist(name, start, end)
+        df = _tencent_board_hist(name, start, end, sw_code=sw_code)
         if not df.empty:
             return df
+    except NoHistorySource as e:
+        print(f"[info] {e}，该板块无 K 线源，跳过")
+        return pd.DataFrame()
     except Exception as e:  # noqa: BLE001
         print(f"[info] 腾讯K线不可用（{name}）：{str(e)[:80]}")
 
     if code:
         try:
-            df = _direct_board_hist(f"90.{code}", start, end)
+            df = _direct_board_hist(f"90.{code}", start, end, attempts=1)
             if not df.empty:
                 return df
         except Exception as e:  # noqa: BLE001
             print(f"[info] 直连K线不可用（{name}）：{str(e)[:80]}，回退 akshare")
 
     ak = _ak()
-    df = _retry(ak.stock_board_industry_hist_em, symbol=name,
-                start_date=start, end_date=end, period="日k", adjust="")
+    df = ak.stock_board_industry_hist_em(symbol=name, start_date=start,
+                                         end_date=end, period="日k", adjust="")
     df = df.rename(columns={
         "日期": "date", "开盘": "open", "收盘": "close", "最高": "high",
         "最低": "low", "成交量": "volume", "成交额": "amount",

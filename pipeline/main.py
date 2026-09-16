@@ -17,6 +17,8 @@ import datetime as dt
 import json
 import pathlib
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import yaml
@@ -25,14 +27,22 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import chips                 # noqa: E402
 import factors as F          # noqa: E402
+import levels                # noqa: E402
 import macro as M            # noqa: E402
 import score as S            # noqa: E402
 import sources               # noqa: E402
+import swing                 # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = pathlib.Path(__file__).resolve().parent / "config"
 DATA = ROOT / "web" / "data"
 CACHE = DATA / "cache"
+
+# 板块宇宙扩到二级细分（127 个）后，K 线与成分股请求量翻 4 倍。
+# 实测这两个通道（腾讯 K 线 / 东财 clist）都能承受 6 路并发；
+# 再高收益递减且容易触发对端限流。
+HIST_WORKERS = 6
+CONS_WORKERS = 6
 
 
 # --------------------------------------------------------------------- utils
@@ -85,33 +95,46 @@ def _write_parquet(name: str, df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------- warmup
+def _hist_one(b: dict, start: str, end: str) -> str:
+    """单个板块的日 K 线增量更新。返回 ok / skip / fail / nosrc。"""
+    fp = CACHE / f"{b['code']}.parquet"
+    try:
+        if fp.exists():
+            old = pd.read_parquet(fp)
+            last = pd.to_datetime(old["date"]).max()
+            beg = (last + pd.Timedelta(days=1)).strftime("%Y%m%d")
+            if beg > end:
+                return "skip"                     # 已是最新
+            new = sources.board_hist(b["name"], beg, end, b["code"], b.get("sw_code"))
+            df = pd.concat([old, new], ignore_index=True).drop_duplicates("date")
+        else:
+            df = sources.board_hist(b["name"], start, end, b["code"], b.get("sw_code"))
+        if df is None or df.empty:
+            print(f"[warn] hist {b['name']}: 无 K 线数据源")
+            return "nosrc"
+        df.to_parquet(fp, index=False)
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] hist {b['name']}: {str(e)[:110]}")
+        return "fail"
+
+
 def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
     """预热：抓历史 K 线（增量）、板块映射、宏观原始数据、新闻、解禁/减持"""
     CACHE.mkdir(parents=True, exist_ok=True)
     end = dt.date.today().strftime("%Y%m%d")
     start = (dt.date.today() - dt.timedelta(days=560)).strftime("%Y%m%d")
 
-    # ---- 板块历史 K 线（增量）
-    ok = 0
-    for b in meta["boards"]:
-        fp = CACHE / f"{b['code']}.parquet"
-        try:
-            if fp.exists():
-                old = pd.read_parquet(fp)
-                last = pd.to_datetime(old["date"]).max()
-                beg = (last + pd.Timedelta(days=1)).strftime("%Y%m%d")
-                if beg > end:
-                    ok += 1
-                    continue
-                new = sources.board_hist(b["name"], beg, end, b["code"])
-                df = pd.concat([old, new], ignore_index=True).drop_duplicates("date")
-            else:
-                df = sources.board_hist(b["name"], start, end, b["code"])
-            df.to_parquet(fp, index=False)
-            ok += 1
-        except Exception as e:  # noqa: BLE001
-            print(f"[warn] hist {b['name']}: {e}")
-    print(f"[warmup] boards {ok}/{len(meta['boards'])}")
+    # ---- 板块历史 K 线（增量，并发）
+    boards = meta["boards"]
+    t0 = time.time()
+    tally = {"ok": 0, "skip": 0, "fail": 0, "nosrc": 0}
+    with ThreadPoolExecutor(max_workers=HIST_WORKERS) as ex:
+        for r in ex.map(lambda b: _hist_one(b, start, end), boards):
+            tally[r] += 1
+    print(f"[warmup] boards ok={tally['ok']} skip={tally['skip']} "
+          f"fail={tally['fail']} nosrc={tally['nosrc']} / {len(boards)}"
+          f"（{time.time() - t0:.1f}s）")
 
     # ---- 新闻
     _write_parquet("news.parquet", sources.fetch_news())
@@ -156,6 +179,27 @@ def _load_macro_inputs() -> dict:
     }
 
 
+def _prefetch_cons(boards: list[dict]) -> dict[str, pd.DataFrame]:
+    """并发预取全部板块成分股（共振因子要用）。
+
+    成分股只能逐个板块请求（clist 的 `secids` 多标的查询在板块上不可用），
+    127 个板块串行是一分钟量级的开销，并发后降到十秒级。
+    单个板块失败只影响它自己的共振因子（退化为中性 0.5），不阻断整体评分。
+    """
+    def one(b: dict):
+        try:
+            return str(b["code"]), sources.board_cons(b["name"], b["code"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] cons {b['name']}: {str(e)[:90]}")
+            return str(b["code"]), pd.DataFrame()
+
+    out: dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=CONS_WORKERS) as ex:
+        for code, df in ex.map(one, boards):
+            out[code] = df
+    return out
+
+
 def stage_score(w: dict, meta: dict) -> None:
     now = dt.datetime.now()
     intraday = bool(w.get("intraday", {}).get("mark", True)) and now.hour < 15
@@ -166,6 +210,11 @@ def stage_score(w: dict, meta: dict) -> None:
         raise SystemExit(f"[error] 板块快照获取失败，保留上一版产物: {e}")
     sidx = {str(r["code"]): r for _, r in snap.iterrows()}
     mktcap = {str(r["code"]): r.get("mktcap") for _, r in snap.iterrows()}
+
+    t_con = time.time()
+    cons_map = _prefetch_cons(meta["boards"])
+    ok_cons = sum(1 for v in cons_map.values() if v is not None and not v.empty)
+    print(f"[score] 成分股就绪 {ok_cons}/{len(meta['boards'])}（{time.time() - t_con:.1f}s）")
 
     mi = _load_macro_inputs()
     news = mi["news"]
@@ -215,6 +264,14 @@ def stage_score(w: dict, meta: dict) -> None:
         news_norm, news_hits = F.board_news(news, b.get("keywords", []), now)
         val_score, val_src = F.valuation(df)
 
+        # 区间位置（从高点回撤 / 从低点反弹）。纯展示用途，不影响评分，
+        # 所以失败只降级为空，绝不让它拖垮整块评分。
+        try:
+            sw = swing.swing_stats(df)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] swing {b['name']}: {str(e)[:90]}")
+            sw = {}
+
         f = {
             "momentum": F.momentum(df, bench_r20),
             "trend": F.trend(df),
@@ -226,7 +283,7 @@ def stage_score(w: dict, meta: dict) -> None:
             "clearing": F.clearing(b.get("clearing_score", 0.5)),
             "policy": F.policy(F.count_hits(news, policy_words)),
             "news": news_norm,
-            "resonance": F.resonance(sources.board_cons(b["name"], b["code"])),
+            "resonance": F.resonance(cons_map.get(str(b["code"]))),
         }
 
         base = S.combine(f, w["weights"])
@@ -242,13 +299,19 @@ def stage_score(w: dict, meta: dict) -> None:
                                 pen_cfg.get("release_threshold", 0.05),
                                 pen_cfg.get("reduction_threshold", 5.0))
 
-        black = any((k in b["name"]) or (k in b.get("keywords", [])) for k in blacklist)
+        # blacklisted 由 sync_boards 在生成 sector_meta 时算好：二级板块要按
+        # 上级一级行业继承（"普钢"命中 blacklist 里的"钢铁"，但字面不含该词）。
+        # 缺字段时回退到旧的字面匹配逻辑。
+        black = b.get("blacklisted")
+        if black is None:
+            black = any((k in b["name"]) or (k in b.get("keywords", [])) for k in blacklist)
         final = S.finalize(base, penalty, black, blk_cap, blk_on)
         label, hint = S.grade(final, w["grade"])
 
         rec = {
             "code": b["code"],
             "name": b["name"],
+            "parent": b.get("parent", ""),
             "score": final,
             "base": round(base, 1),
             "label": label,
@@ -261,6 +324,7 @@ def stage_score(w: dict, meta: dict) -> None:
                                "release_mv_yi": rel_detail.get("release_mv_yi"),
                                "reduction_cnt": rcnt},
             "valuation_source": val_src,
+            "swing": sw,
             "intraday": intraday,
             "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
             "news": news_hits[:20],
@@ -292,6 +356,7 @@ def stage_score(w: dict, meta: dict) -> None:
         "macro_score": m,
         "macro_zone": S.macro_zone(m, ga, gn),
         "count": len(scored),
+        "level": meta.get("level", ""),
         "bench_r20": None if bench_r20 is None else round(bench_r20, 4),
         "macro_detail": {
             "liquidity": {"score": round(liq, 3), **liq_d},
@@ -307,7 +372,27 @@ def stage_score(w: dict, meta: dict) -> None:
         "code": r["code"], "name": r["name"], "score": r["score"],
         "label": r["label"],
         "action_hint": S.action_matrix(r["score"], m, ga, gn),
+        "parent": r.get("parent", ""),
+        # 区间位置精简版（默认 250 日窗口）：供前端列表排序与展示，
+        # 分窗口明细在各板块自己的 JSON 里，避免 index 膨胀
+        "swing": swing.brief(r.get("swing") or {}),
     } for r in scored])
+
+    # ---- 大盘关键位（周线 / 月线 / 年线支撑压力）
+    # 优先用 warmup 缓存的指数日线；缓存缺失才回源，避免评分阶段额外外呼
+    try:
+        def _idx_daily(sym: str) -> pd.DataFrame:
+            fp = DATA / ("index_sh.parquet" if sym == "sh000001" else "index_hs300.parquet")
+            if fp.exists():
+                return pd.read_parquet(fp)
+            return sources.index_daily(sym)
+
+        lv = levels.build(_idx_daily)
+        _dump(DATA / "levels.json", lv)
+        head = (lv["indices"][0].get("summary") or {}).get("text", "")
+        print(f"[score] 大盘关键位：{head}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] levels: {str(e)[:140]}")
 
     arc = DATA / "archive" / now.strftime("%Y/%m")
     _dump(arc / f"{now.strftime('%Y%m%d_%H%M')}.json", {
