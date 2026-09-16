@@ -44,10 +44,23 @@ class Snapshots(list):
 
 
 def load_snapshots(archive_dir: pathlib.Path = ARCHIVE) -> list[dict]:
-    """读取归档快照，返回 [{date, code->score, name->..., macro}]，按日期升序
+    """读取归档快照，返回 [{date, scores, names, factors, macro}]，按日期升序
 
     带 `demo: true` 标记的快照（make_demo.py 合成的）会被剔除，避免仿真
     数据混入后得出虚高的 IC / 胜率；剔除条数记录在返回值的 .skipped_demo。
+
+    归档目录里有**两种**文件（都由 main.py 的 score 阶段写出）：
+
+    | 文件 | 内容 | 体积 |
+    |---|---|---|
+    | `YYYYMMDD_HHMM.json` | 整份快照（逐板块明细、新闻、swing…） | 大 |
+    | `YYYYMMDD_HHMM_summary.json` | **轻量「分数矩阵」**（code/name/score + 可选 11 维因子） | 几 KB |
+
+    两者合并成一个日期轴：**同一天有多份时「整份快照」优先于 summary**
+    （summary 字段更少，不能让它把整份的信息遮蔽掉），同类型则后写的覆盖先写的。
+    特意让 summary 也能被这里读到，是为了**跨日样本能真正积累** —— 整份归档
+    体积大、每天多份却都在同一天，按日期去重后样本数恒为 1，「样本不足」是
+    结构性的（见 docs/backtest_report_hist.md §6.5.0）。
     """
     out = Snapshots()
     if not archive_dir.exists():
@@ -68,17 +81,30 @@ def load_snapshots(archive_dir: pathlib.Path = ARCHIVE) -> list[dict]:
             date = pd.Timestamp(updated).normalize()
         except Exception:  # noqa: BLE001
             date = pd.Timestamp(fp.stem[:8])
+        # summary 里如果带了 factors 就收下来（整份快照同样带）；空则记空 dict，
+        # 下游按「有没有因子」决定要不要出逐因子 IC 表。
+        facs = {}
+        for b in boards:
+            fv = b.get("factors") or {}
+            if fv:
+                facs[str(b["code"])] = {str(k): float(v) for k, v in fv.items()}
         out.append({
             "date": date,
             "file": fp.name,
+            "kind": "summary" if obj.get("kind") == "score_summary" else "full",
             "intraday": bool(obj.get("intraday")),
             "macro_score": obj.get("macro_score"),
             "scores": {str(b["code"]): float(b["score"]) for b in boards},
             "names": {str(b["code"]): str(b.get("name", "")) for b in boards},
+            "factors": facs,
         })
-    # 同一天多次运行（盘中+收盘）只保留最后一次
+    # 同一天多份只留一份：**整份快照优先于轻量 summary**（summary 字段更少，
+    # 不能让它遮蔽整份的信息）；同类型则后写的（收盘）覆盖先写的（盘中）。
     dedup: dict[pd.Timestamp, dict] = {}
     for s in out:
+        cur = dedup.get(s["date"])
+        if cur is not None and cur["kind"] == "full" and s["kind"] == "summary":
+            continue
         dedup[s["date"]] = s
     res = Snapshots([dedup[k] for k in sorted(dedup)])
     res.skipped_demo = out.skipped_demo
@@ -151,6 +177,8 @@ def evaluate(snapshots: list[dict], klines: dict[str, pd.DataFrame],
     """返回 (指标汇总, 明细 DataFrame)"""
     rows: list[dict] = []
     used_dates: list[pd.Timestamp] = []
+    # 逐因子 IC：factor -> horizon -> [每天的 IC]
+    fac_ics: dict[str, dict[int, list[float]]] = {}
 
     for snap in snapshots:
         codes = [c for c in snap["scores"] if c in klines]
@@ -160,10 +188,13 @@ def evaluate(snapshots: list[dict], klines: dict[str, pd.DataFrame],
         if np.isfinite(scores).sum() < min_boards:
             continue
         rec = {"date": snap["date"], "n": len(codes), "macro_score": snap["macro_score"]}
+        # 未来收益每个持有期只算一次，逐因子 IC 直接复用
+        # （否则 11 个因子 × 4 个持有期要重复算 44 遍 forward_return）
+        rets_by_h = {h: np.array([forward_return(klines[c], snap["date"], h) or np.nan
+                                  for c in codes], dtype=float) for h in horizons}
         ok = False
         for h in horizons:
-            rets = np.array([forward_return(klines[c], snap["date"], h) or np.nan
-                             for c in codes], dtype=float)
+            rets = rets_by_h[h]
             rec[f"ic_{h}d"] = spearman(scores, rets)
             if np.isfinite(rets).sum() >= min_boards:
                 ok = True
@@ -176,6 +207,22 @@ def evaluate(snapshots: list[dict], klines: dict[str, pd.DataFrame],
                     rec[f"ls_{h}d"] = rec.get(f"q{quantiles}_{h}d", np.nan) - rec.get(f"q1_{h}d", np.nan)
                 except Exception:  # noqa: BLE001
                     pass
+
+        # ---- 逐因子 IC（只有带 factors 的快照才算；summary / 整份归档都会带）
+        # 价值：`backtest_hist.py` 只能覆盖 6 个可回溯维度，主力资金流 / 出清度 /
+        # 政策 / 新闻情绪 / 板块共振这 5 维（合计权重 46%）**只有靠这里**才能评估。
+        if snap.get("factors"):
+            fnames = sorted({k for c in codes for k in snap["factors"].get(c, {})})
+            for fname in fnames:
+                vals = np.array([snap["factors"].get(c, {}).get(fname, np.nan)
+                                 for c in codes], dtype=float)
+                if np.isfinite(vals).sum() < min_boards:
+                    continue
+                for h in horizons:
+                    ic = spearman(vals, rets_by_h[h])
+                    if np.isfinite(ic):
+                        fac_ics.setdefault(fname, {}).setdefault(h, []).append(ic)
+
         if ok:
             rows.append(rec)
             used_dates.append(snap["date"])
@@ -184,6 +231,11 @@ def evaluate(snapshots: list[dict], klines: dict[str, pd.DataFrame],
     summary: dict = {"n_dates": len(detail), "horizons": horizons,
                      "quantiles": quantiles, "metrics": {},
                      "skipped_demo": int(getattr(snapshots, "skipped_demo", 0))}
+    if fac_ics:
+        summary["factor_ic"] = {
+            f: {f"{h}d": float(np.mean(v)) if v else float("nan") for h, v in hs.items()}
+            for f, hs in fac_ics.items()
+        }
     if detail.empty:
         return summary, detail
 
@@ -242,10 +294,19 @@ def render_report(summary: dict, detail: pd.DataFrame,
         L.append("")
         L.append("原因通常是：")
         L.append("")
-        L.append("1. `web/data/archive/` 积累的评分快照还不够（每运行一次 score 归档一次）")
-        L.append("2. 快照日期晚于K线缓存的最新日期（需先跑 `--stage warmup` 补K线）")
+        L.append("1. 快照日期晚于K线缓存的最新日期（需先跑 `--stage warmup` 补K线）")
+        L.append("2. `web/data/archive/` 里跨日的快照还不够")
         L.append("")
-        L.append("**建议**：先让每日定时任务跑 2–4 周，再回来执行本脚本。")
+        L.append("⚠️ **注意「同一天多份」不算样本**：归档按日期去重，同一交易日无论写了几份")
+        L.append("（14:00 盘中 + 15:30 收盘 + 手动重跑）都只算 **1 天**。所以「再等几天就好」")
+        L.append("是错的 —— 判断样本会不会长起来要看**日期维度**，不是文件个数。")
+        L.append("")
+        L.append("**建议**：")
+        L.append("")
+        L.append("- 短期要结论 → 用 `pipeline/backtest_hist.py`（长历史点内重建，不依赖归档，")
+        L.append("  覆盖 6 个可回溯维度），产出 `docs/backtest_report_hist.md`")
+        L.append("- 要用**线上真实发布分**（12 维全套）做 IC → 让 `main.py` 的 score 阶段持续写")
+        L.append("  `*_summary.json`（每次 score 自动生成，几 KB），跨日积累后本脚本才有意义")
         L.append("")
         L.append("## 判读标准（供未来参考）")
         L.append("")
@@ -287,7 +348,24 @@ def render_report(summary: dict, detail: pd.DataFrame,
             cells.append("—" if v is None or not np.isfinite(v) else f"{v * 100:+.2f}%")
         L.append(f"| {k} | " + " | ".join(cells) + " |")
     L.append("")
-    L.append("## 三、逐期明细")
+    fic = summary.get("factor_ic") or {}
+    if fic:
+        L.append("## 三、逐因子 IC（用**线上真实发布**的因子值算，非重建）")
+        L.append("")
+        L.append("| 因子 | " + " | ".join(f"{h} 日" for h in summary["horizons"]) + " |")
+        L.append("|---" * (len(summary["horizons"]) + 1) + "|")
+        for fname, hs in sorted(fic.items()):
+            cells = []
+            for h in summary["horizons"]:
+                v = hs.get(f"{h}d")
+                cells.append("—" if v is None or not np.isfinite(v) else f"{v:+.3f}")
+            L.append(f"| `{fname}` | " + " | ".join(cells) + " |")
+        L.append("")
+        L.append("> 这张表的价值：主力资金流 / 出清度 / 政策 / 新闻情绪 / 板块共振这 5 维"
+                 "（合计权重 46%）**无法**用 `backtest_hist.py` 重建，只有线上真实发布分"
+                 "能提供；样本（= 跨日快照数）攒够之前，请只当趋势看，别据此调权重。")
+        L.append("")
+    L.append("## 四、逐期明细")
     L.append("")
     cols = [c for c in detail.columns if c != "date"]
     L.append("| 日期 | " + " | ".join(c.replace("_", " ") for c in cols) + " |")

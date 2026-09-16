@@ -450,6 +450,35 @@ def stage_score(w: dict, meta: dict) -> None:
         # backtest.load_snapshots 据此剔除合成快照
         "demo": False,
     })
+
+    # ---- 轻量「分数矩阵」快照（跨日 IC 评估用；开关见 weights.yaml 的 archive 段）
+    # 为什么非写不可：整份归档每天写多份、但都挤在**同一天**，backtest 按日期去重后
+    # 样本数恒为 1，「样本不足」是结构性的（见 docs/backtest_report_hist.md §6.5.0）。
+    # 这份 summary 只有 code/name/score(+factors)，几 KB，让跨日样本真正积累。
+    # 文件名带 _summary 后缀，backtest.load_snapshots 认得它，且**同一天以整份快照优先**。
+    # 必须同样带 demo 标记：与整份归档同款约定，否则合成数据会污染 IC。
+    arc_cfg = w.get("archive", {}) or {}
+    if arc_cfg.get("summary", True):
+        with_f = bool(arc_cfg.get("summary_factors", True))
+        brief = []
+        for r in scored:
+            item = {"code": r["code"], "name": r["name"], "score": round(r["score"], 2)}
+            if with_f:
+                item["factors"] = {k: round(v, 2) for k, v in r["factors"].items()}
+                item["penalty"] = round(r["penalty"], 2)
+            brief.append(item)
+        s_fp = arc / f"{now.strftime('%Y%m%d_%H%M')}_summary.json"
+        _dump(s_fp, {
+            "kind": "score_summary",
+            "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "intraday": intraday,
+            "macro_score": m,
+            "count": len(brief),
+            "boards": brief,
+            "demo": False,
+        })
+        print(f"[score] 分数矩阵 summary {len(brief)} 条（含因子={with_f}）"
+              f"-> {s_fp.name}")
     print(f"[score] {len(scored)} boards | macro={m} ({S.macro_zone(m, ga, gn)}) "
           f"| 流动性{liq:.2f} 量价{vp:.2f} 政策{pol:.2f} 情绪{sent:.2f} | intraday={intraday}")
 

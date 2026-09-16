@@ -36,6 +36,12 @@ logs/
 # 见 .github/workflows/daily.yml；本地跑仍照常读写该目录。
 web/data/cache/
 
+# ================= 长历史回测数据（不入 git）=================
+# pipeline/backtest_hist.py 的一次性取数产物：120 板块 × 2001 根日线
+# （约 6MB）+ 1.7 万条解禁明细。属于「可随时重新抓取」的原料，
+# 且**必须放在 web/ 之外** —— 放进 web/ 会被 Pages 一起发布出去。
+bt_data/
+
 # ================= 注意：以下目录必须提交，不要加进忽略 =================
 # web/data/            评分产物，GitHub Pages 的发布内容
 # web/data/archive/    每日评分留痕，回测与事后复核的依据
