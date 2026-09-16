@@ -332,6 +332,22 @@ def stage_score(w: dict, meta: dict) -> None:
         scored.append(rec)
         _dump(DATA / "sectors" / f"{b['code']}.json", rec)
 
+    # 板块宇宙变更时（例如 申万一级 -> 申万二级），旧板块的 JSON 既不会被覆盖
+    # 也永不删除，会让已发布的 web/data/sectors/ 长期堆积无效文件。
+    # 以 meta["boards"]（当前宇宙）而非 scored（本轮成功项）为基准判断：
+    # 偶发失败的板块只是本轮不刷新，文件保留、下轮重写，不会被误删。
+    keep = {str(b["code"]) for b in meta["boards"]}
+    sdir = DATA / "sectors"
+    if sdir.exists():
+        stale = [p for p in sdir.glob("*.json") if p.stem not in keep]
+        for p in stale:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        if stale:
+            print(f"[score] 清理 {len(stale)} 个已移出宇宙的板块 JSON（当前宇宙 {len(keep)} 个）")
+
     if not scored:
         raise SystemExit("[error] 无任何板块完成评分，保留上一版产物")
 
