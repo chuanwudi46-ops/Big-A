@@ -3,12 +3,27 @@
 借鉴「帽子哥」投资分析框架（分批-纪律型 + 跷跷板轮动 + 解禁筹码供给 + 日式低增长应对）构建的
 **A 股行业板块量化评分与新闻工作台**。
 
+- 覆盖 **申万二级行业 120 个**（可改一行配置切回一级 31 个或切到三级）
 - 每个交易日 **14:00** 自动评分（盘中快照），15:30 收盘复核归档
+- **板块评分视图**：12 维评分 + 宏观分组成决策矩阵，输出可执行动作而非单一信号
+- **回撤 / 涨幅视图**：逐板块的 20/60/250 日从高点回撤、从低点反弹、区间位置
+- **大盘关键位**：上证 / 沪深300 的周线·月线·年线压力位与支撑位
 - 手机浏览器打开即用，可「添加到主屏幕」当 App 用
 - 全免费数据源，零服务器（GitHub Actions + GitHub Pages）
-- 12 维评分 + 宏观分组成决策矩阵，输出可执行动作而非单一信号
 
 > 评分仅作研究参考，不构成投资建议。详见 [DISCLAIMER.md](DISCLAIMER.md)。
+
+## 文档索引
+
+| 文档 | 用途 | 什么时候看 |
+|---|---|---|
+| **[炒股工作台_交接文档_v2.0_20260916.md](炒股工作台_交接文档_v2.0_20260916.md)** | **现状与交接书**：实测数据通道、产物 schema、红线约定、运维手册、踩坑清单、待办 | **接手第一份就读它** |
+| [部署与投产手册.md](部署与投产手册.md) | 从零把项目上线到 GitHub Pages 的完整步骤 | 要重新部署 / 换仓库时 |
+| [炒股工作台_交接文档_v1.0_20260911.md](炒股工作台_交接文档_v1.0_20260911.md) | 设计规格书（需求全景、评分维度设计意图） | 想了解「为什么这么设计」时 |
+| [backtest_report.md](backtest_report.md) | 回测报告（IC / 分层 / 多空），由 `pipeline/backtest.py` 生成 | 做权重校准时 |
+| [DISCLAIMER.md](DISCLAIMER.md) | 免责声明 | — |
+
+> 站点：**https://chuanwudi46-ops.github.io/Big-A/**　|　手机扫码：`手机访问二维码.png`
 
 ---
 
@@ -54,18 +69,33 @@ GitHub Pages（静态托管）
 
 ```bash
 pip install -r pipeline/requirements.txt
+
+# 方式一：用现成的白名单（board_universe.json 已随仓库提供，申万二级 120 个）
 python pipeline/sync_boards.py     # 生成 pipeline/config/sector_meta.json
+
+# 方式二：重新生成白名单（需要能访问申万/东财）
+python pipeline/build_universe.py            # 由申万名单 ∩ 东财板块自动生成
+python pipeline/build_universe.py --level 申万一级行业   # 想换层级就改这个参数
+python pipeline/sync_boards.py --force       # 换层级后必须重建元数据
 ```
 
 把生成的 `sector_meta.json` 提交上去。这一步会把实时板块清单与 `keywords_seed.json`
 合并，并为缺少关键词的板块补默认值（脚本会提示哪些板块建议补充关键词）。
 
+> `build_universe.py` 还会**按 K 线可用性自动剔除标的**
+> （判据：条数 ≥250 **且** 最后一根 bar 在 45 天内），
+> 被剔除的会记进 `board_universe.json` 的 `no_kline` 字段，便于事后核对。
+
 ### 5. 手动跑一次数据
 
 `Actions → daily-score → Run workflow`
 
-- 第一次：stage 选 `warmup`（下载约 560 天历史 K 线，耗时较长）
-- 第二次：stage 选 `score`
+- **第一次：stage 选 `warmup`**（抓 120 个板块的日 K 线与各类中间数据，实测约 7 s）
+- **第二次：stage 选 `score`**（评分并产出 `web/data`，实测约 9 s）
+
+> ⚠️ **顺序不能反**。K 线缓存的 key 带 `run_id`，换宇宙后旧缓存里没有新板块，
+> 只跑 `score` 会对新板块 `[skip]`，结果 `count` 不足。
+> 换宇宙 / 大改之后一律「先 warmup 再 score」。
 
 之后每天会自动运行。
 
@@ -167,28 +197,49 @@ python pipeline/backtest.py --horizons 3,10,30 --quantiles 5
 > 样本不足时脚本不会报错，而是输出说明性报告。
 > 用 `--simulate` 生成的合成数据可立刻验证脚本本身是否正常。
 
-## 七、关于数据源的可用性（重要）
+## 七、关于数据源的可用性（重要，已按实测校准）
 
-代码内置**双通道**：优先 akshare，失败自动回退东方财富公开接口直连。
+**一句话**：东财的 **K 线通道在境外（GitHub Actions）完全不可用**，因此 K 线已改走**腾讯行情**；
+东财只保留它可用的部分（`push2delay` 的 clist、`datacenter-web`）。
 
-原因：实测 akshare 部分接口硬编码了分片域名（例如 `17.push2.eastmoney.com`），
-在部分网络环境（校园网、企业网、部分云主机）下**该域名不可达**，而
-`push2.eastmoney.com` 正常。双通道可避免此类环境直接跑挂。
+各用途的取数优先级：
 
-如果两个通道都失败，说明该网络对东财接口整体不通，此时：
+| 用途 | 优先级 | 说明 |
+|---|---|---|
+| 板块日 K 线 | **腾讯 → 东财直连 → akshare** | 腾讯的 `newfqkline/get` 是唯一可用通道 |
+| 板块快照 / 成分股 | 东财 `push2delay` clist 直连 | `push2` 在境内外都不可用 |
+| 高管持股变动 | `datacenter-web` + 服务端 `filter` | 直连 0.98 s；akshare 同数据要 8 分 49 秒 |
 
-1. 换网络环境重试；或
-2. 让 GitHub Actions 跑（CI 出口在境外，通常可正常访问）；或
-3. 用 `python pipeline/make_demo.py` 先生成合成数据把界面调通
+实测可达性：
+
+| 端点 | 境外（CI） | 国内本机 |
+|---|---|---|
+| `push2.eastmoney.com` | ❌ 302→502 | ❌ 不可达 |
+| `push2his.eastmoney.com`（K线） | ⚠️ 连几次后断连 | ❌ 断连 |
+| `push2delay` **clist** | ✅ | ✅ |
+| `push2delay` **K线** | ⚠️ 软限流（HTTP 200 但数据为空） | ⚠️ 同左 |
+| `datacenter-web` | ✅ | ✅ |
+| **腾讯 / 新浪行情** | ✅ | ✅ |
+
+> ⚠️ **不要以为「CI 在境外所以东财更好访问」** —— 恰恰相反，东财对境外出口有地区封锁。
+> 遇到抓不到数据，先按上表确认走的是哪条通道，而不是换网络重试。
+> 完整的探针结论与排查方法见交接文档 v2.0 第 4 节。
+
+如果所有通道都失败：
+
+1. 确认 `pipeline/sources.py` 里的优先级没被改错（K 线必须是腾讯优先）
+2. 用 `python pipeline/make_demo.py --simulate 60` 先生成合成数据把界面调通
+   （产物带 `demo: true`，前端会显示警示横幅，不会与真实评分混淆）
 
 ## 八、已知待补项
 
 | 项 | 说明 |
 |---|---|
-| 权重为**先验值** | 尚未用真实历史数据校准，需积累快照后用 `backtest.py` 调优 |
-| 行业估值映射 | tushare 走申万行业代码，与东财板块尚未建立完整映射；未命中时自动用价格分位代理 |
-| 尾盘/盘中差异 | 14:00 评分基于未完成 bar，收盘后数值会变化 |
+| 权重为**先验值** | 尚未用真实历史数据校准，需积累快照后用 `backtest.py` 调优（建议 2–4 周） |
+| 行业估值无真实 PE | 估值维度（权重 10%）现用 252 日价格分位**代理**，产物标 `valuation_source`。<br>**不是映射问题**：申万↔东财映射已建好（`board_universe.json` 带 `sw_codes` / `board_codes`）。<br>真障碍是 **tushare 拿不到行业估值** —— `index_dailybasic` 需 4000 积分起，且官方只提供上证综指/深证成指/上证50/中证500/中小板指/创业板指，**不含任何行业**。<br>下一步走 akshare 免费行业市盈率（巨潮 / 中证） |
+| 尾盘/盘中差异 | 14:00 评分基于未完成 bar（产物标 `intraday: true`），收盘后数值会变化 |
 | 板块成分股为快照 | `stock_board_map` 缓存 7 天，成分股调整期内可能短暂不准 |
+| 真机未实测 | 本机无法模拟手机网络，需在 iOS Safari / Android Chrome 各验一次 |
 
 > 以下已于 P1 补齐：宏观四要素真实数据（`macro.py`）、解禁精确归属与减持计数（`chips.py`）、
 > 真实交易日历、评分回测与 IC 分析（`backtest.py`）、前端 IndexedDB 缓存。
