@@ -38,6 +38,17 @@ EM_HOSTS = (
 CLIST_HOSTS = EM_HOSTS          # 板块/个股列表
 KLINE_HOSTS = EM_HOSTS          # 板块日 K 线
 
+# 腾讯行情：申万一级行业指数。作为 K 线的**首选**通道。
+# 原因：东财的 K 线域名在海外 runner 上全不可用（push2his 连几次即断连、
+# push2 固定 502），push2delay 虽可达但会软限流（返回 HTTP 200 而 klines
+# 为空、dktotal=0），实测 31 个板块里稳定掉 1~2 个。
+# 腾讯此接口：海内外均可达、无地区限制，实测 31/31 全部成功、总耗时约 3 秒，
+# 且其「行业」分类恰为申万一级 31 个，与 board_universe.json 完全同名。
+TENCENT_KLINE = ("https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
+                 "?param={code},day,{start},{end},{count},qfq")
+TENCENT_RANK = ("https://proxy.finance.qq.com/cgi/cgi-bin/rank/pt/getRank"
+                "?board_type=hy&sort_type=price&direct=down&offset=0&count=60")
+
 _session: requests.Session | None = None
 _session_noproxy: requests.Session | None = None
 
@@ -210,6 +221,81 @@ def _direct_board_hist(secid: str, start: str, end: str, limit: int = 600) -> pd
     raise RuntimeError(f"所有 K 线通道均失败（{secid}）：{last_err}")
 
 
+_tx_map: dict[str, str] | None = None
+
+
+def _tencent_industry_map() -> dict[str, str]:
+    """申万一级行业名 -> 腾讯板块代码（形如 pt01801120）。结果 memo。"""
+    global _tx_map
+    if _tx_map is not None:
+        return _tx_map
+    try:
+        r = _get(TENCENT_RANK, timeout=15)
+        r.raise_for_status()
+        rows = (r.json().get("data") or {}).get("rank_list") or []
+        _tx_map = {str(x["name"]): str(x["code"]) for x in rows if x.get("name")}
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] 腾讯行业清单不可用：{str(e)[:80]}")
+        _tx_map = {}
+    return _tx_map
+
+
+def _tencent_board_hist(name: str, start: str, end: str, count: int = 800) -> pd.DataFrame:
+    """腾讯行情：申万一级行业指数日 K 线。
+
+    start/end 格式 YYYYMMDD（与本地包接口一致）。bar 字段位置经实测校准：
+    [日期, 开, 收, 高, 低, 成交量(手), {}, 换手率%, 成交额(万元), ...]。
+    涨跌幅不取腾讯的字段位置（不同品种长度不一），改用收盘价自行推算，
+    为保证首根 bar 的涨跌幅正确，取数区间向前多留 15 个自然日再裁剪。
+    """
+    code = _tencent_industry_map().get(name)
+    if not code:
+        raise RuntimeError(f"腾讯未收录该行业：{name}")
+
+    def _iso(d: str) -> str:
+        return f"{d[0:4]}-{d[4:6]}-{d[6:8]}"
+
+    # 向前多取 15 天，供 pct_change 有前收可比；再按原始 start 裁剪
+    s_date = dt.datetime.strptime(start, "%Y%m%d").date() - dt.timedelta(days=15)
+    url = TENCENT_KLINE.format(code=code, start=s_date.strftime("%Y-%m-%d"),
+                               end=_iso(end), count=count)
+    r = _get(url, timeout=20)
+    r.raise_for_status()
+    bars = ((r.json().get("data") or {}).get(code) or {}).get("day") or []
+    if len(bars) < 30:
+        raise RuntimeError(f"腾讯 K 线不足（{name}：{len(bars)} 根）")
+
+    def _f(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    recs = []
+    for b in bars:
+        if len(b) < 9:
+            continue
+        recs.append({
+            "date": b[0],
+            "open": _f(b[1]), "close": _f(b[2]),
+            "high": _f(b[3]), "low": _f(b[4]),
+            "volume": _f(b[5]),
+            "turnover": _f(b[7]),
+            # 腾讯成交额单位为万元，换算成「元」与东财口径对齐
+            "amount": _f(b[8]) * 1e4,
+        })
+    df = pd.DataFrame(recs)
+    if df.empty:
+        raise RuntimeError(f"腾讯 K 线解析为空（{name}）")
+    df["pct"] = (df["close"].pct_change() * 100).fillna(0.0)
+    raw_start = _iso(start)
+    df = df[df["date"] >= raw_start].reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"腾讯 K 线裁剪后为空（{name}）")
+    return df[["date", "open", "close", "high", "low",
+               "volume", "amount", "pct", "turnover"]]
+
+
 def _direct_news(limit: int = 100) -> pd.DataFrame:
     """直连获取东财 7x24 快讯"""
     url = ("https://np-listapi.eastmoney.com/comm/web/getFastNewsList"
@@ -299,10 +385,18 @@ def board_snapshot() -> pd.DataFrame:
 def board_hist(name: str, start: str, end: str, code: str | None = None) -> pd.DataFrame:
     """板块日 K 线。start/end 格式 YYYYMMDD；code 为东财板块代码（如 BK1201）。
 
-    直连优先：akshare 的 stock_board_industry_hist_em 走 push2his，该域名在
-    海外 runner 上连续请求几次即连接失败，且每次失败要空等 3 次重试；
-    直连走 push2delay 稳定且更快。所有直连通道都失败时才回退 akshare。
+    通道优先级：**腾讯（申万一级行业指数）→ 东财直连 → akshare**。
+    腾讯优先的三个理由：① 海内外均可达，不受东财分片域名封锁影响；
+    ② 31 个一级行业与 board_universe.json 同名，天然一一对应；
+    ③ 实测 31/31 全成功、总耗时约 3 秒，远快于 akshare 的逐块重试。
     """
+    try:
+        df = _tencent_board_hist(name, start, end)
+        if not df.empty:
+            return df
+    except Exception as e:  # noqa: BLE001
+        print(f"[info] 腾讯K线不可用（{name}）：{str(e)[:80]}")
+
     if code:
         try:
             df = _direct_board_hist(f"90.{code}", start, end)
