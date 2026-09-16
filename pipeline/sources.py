@@ -119,9 +119,14 @@ def _ak():
 def _push2_clist_on(base: str, fs: str, fields: str, pz: int) -> list[dict]:
     """在指定域名上分页拉取 clist。
 
-    注意：服务端把单页上限硬编码为 100（请求 pz=200/500 也只回 100 条），
+    注意 1：服务端把单页上限硬编码为 100（请求 pz=200/500 也只回 100 条），
     因此翻页条件不能拿 pz 比，必须拿「服务端实际页大小」比，否则大数据集
     （如 496 个行业板块、成分股数百只的板块）会被静默截断。
+
+    注意 2：排序键用 **f12（代码）+ po=0 升序**，不要用 f3（涨幅）。
+    涨跌幅盘中一直在变，分页期间排序会重排导致跨页串位 —— 实测 496 个板块
+    会重复 1 条、漏掉 1 个板块，表现为「随机掉块」。代码是静态的，页边界稳定。
+    调用方均按 code/name 建映射，不依赖顺序，故换键无副作用。
     """
     page_size = min(pz, 100)
     rows: list[dict] = []
@@ -129,7 +134,7 @@ def _push2_clist_on(base: str, fs: str, fields: str, pz: int) -> list[dict]:
     pn = 1
     while pn <= 50:                       # 防御：pn 失效时不至于死循环
         url = (f"{base}/api/qt/clist/get"
-               f"?pn={pn}&pz={page_size}&po=1&np=1&fltt=2&invt=2&fid=f3"
+               f"?pn={pn}&pz={page_size}&po=0&np=1&fltt=2&invt=2&fid=f12"
                f"&fs={fs}&fields={fields}")
         r = _get(url, timeout=15)
         r.raise_for_status()

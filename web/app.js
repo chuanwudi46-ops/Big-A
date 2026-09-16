@@ -103,6 +103,9 @@ function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val));
    2) secids 参数在 clist 上不可用（rc:102 / data:null），只能全量拉再本地索引。
    3) push2 = 实时行情（手机首选）；push2delay = 延时行情（海外 runner 才需要，
       手机端仅作兜底）。顺序不能反，否则盘中看到的是延时价。
+   4) 排序键必须用 **f12 代码（静态）+ po=0 升序**，不能用 f3 涨幅：
+      涨幅盘中一直在变，翻页边界会串位 —— 实测 496 条里会重复 1 条、漏掉 1 个板块。
+      我们只做本地索引、不关心顺序，故换稳定排序键零副作用。
    ================================================================= */
 const LIVE_HOSTS = ['push2.eastmoney.com', 'push2delay.eastmoney.com'];
 const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f104,f105';
@@ -110,7 +113,7 @@ const LIVE_PAGE = 100;               // 服务端硬上限，改大无效
 
 function liveURL(host, pn) {
   return `https://${host}/api/qt/clist/get`
-    + `?pn=${pn}&pz=${LIVE_PAGE}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2`
+    + `?pn=${pn}&pz=${LIVE_PAGE}&po=0&np=1&fltt=2&invt=2&fid=f12&fs=m:90+t:2`
     + `&fields=${LIVE_FIELDS}`;
 }
 
