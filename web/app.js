@@ -361,7 +361,9 @@ function posClass(p) {
 
 function levelCell(x, kind) {
   if (!x) return `<span class="lv-none">${kind === 'res' ? '上方无压力' : '下方无支撑'}</span>`;
-  return `<span class="lv-${kind}${x.near ? ' near' : ''}">${x.price.toFixed(2)}`
+  // touches>1：该位置被反复测试过（后端只对日线档做了同价位合并，故只有日线会出现）
+  const t = x.touches > 1 ? `<u class="lvtouch">×${x.touches}</u>` : '';
+  return `<span class="lv-${kind}${x.near ? ' near' : ''}">${x.price.toFixed(2)}${t}`
     + `<i>${fmtPct(x.gap_pct)}</i></span>`;
 }
 
@@ -404,7 +406,129 @@ function renderLevels(lv, sel = 0) {
     ${I.summary?.text ? `<p class="lv-sum">${I.summary.text}</p>` : ''}
     ${notes ? `<ul class="lv-notes">${notes}</ul>` : ''}
     <details class="lv-more"><summary>全部档位</summary>${all}</details>
+    <p class="src">日线取 120 个交易日内 k=5 的摆动高低点，并把 0.8% 内的同价位合并成
+      「位置区」（×N 表示被测试 N 次，次数越多越硬）；周线 / 月线 / 年线取各自周期的
+      摆动高低点。压力位只列现价上方、支撑位只列现价下方 —— 已被突破的位置没有参考价值。</p>
   </section>`;
+}
+
+/* ==================== 事件日历（宏观 / 政策 / 市场事件） ====================
+   数据来自 events.json。每条事件都带 level（3 高 / 2 中 / 1 低）与 src 出处：
+   - eastmoney 东财财经日历真实事件表
+   - rule      规则推算（如每月第 3 个周五 = 股指期货交割日）
+   - release   本仓库解禁数据（与筹码供给罚分同源）
+   - curated   人工惯例清单，前端会标注「惯例」——不把推断日期伪装成官方日期
+   ============================================================================ */
+
+const EV_CATS = [['all', '全部'], ['us', '美国'], ['cn', '中国'],
+                 ['global', '海外'], ['market', 'A股']];
+const EV_LEVELS = [[3, '仅高'], [2, '高 + 中'], [1, '全部']];
+const EV_SRC_TAG = { rule: '规则', release: '解禁', curated: '惯例' };
+
+/** 事件日期距今天数（负数 = 已过去） */
+function dayDiff(ds) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return Math.round((new Date(`${ds}T00:00:00`) - t) / 86400000);
+}
+
+function relDay(n) {
+  if (n === 0) return '今天';
+  if (n === 1) return '明天';
+  if (n === 2) return '后天';
+  if (n === -1) return '昨天';
+  return n > 0 ? `${n} 天后` : `${-n} 天前`;
+}
+
+function evFiltered() {
+  const ev = state.events?.events || [];
+  const minLv = Number(state.evLevel) || 2;
+  return ev.filter((e) => e.level >= minLv
+    && (state.evCat === 'all' || e.cat === state.evCat));
+}
+
+/** 未来 N 天内的高优先事件数（用于 tab 徽章） */
+function upcomingHigh(days = 7) {
+  const ev = state.events?.events || [];
+  return ev.filter((e) => e.level >= 3 && dayDiff(e.date) >= 0 && dayDiff(e.date) <= days);
+}
+
+function evRow(e) {
+  const lv = e.level >= 3 ? 'lv3' : (e.level === 2 ? 'lv2' : 'lv1');
+  const stars = e.level >= 3 ? '★★★' : (e.level === 2 ? '★★' : '★');
+  const tag = EV_SRC_TAG[e.src] ? `<i class="evsrc">${EV_SRC_TAG[e.src]}</i>` : '';
+  const cat = state.events?.cats?.[e.cat]?.label || e.cat;
+  const detail = (e.detail || []).length
+    ? `<details class="evmore"><summary>${e.n > 1 ? `${e.n} 条明细` : '明细'}</summary>
+         <ul>${(e.detail || []).map((d) => `<li>${d}</li>`).join('')}</ul></details>`
+    : '';
+  return `<div class="ev ${lv}">
+    <span class="evmk">${stars}</span>
+    <div class="evmain">
+      <p class="evt">${e.time ? `<b>${e.time}</b>` : ''}${e.name}
+        <i class="evcat ${e.cat}">${cat}</i>${tag}</p>
+      ${e.level >= 2 && e.why ? `<p class="evw">${e.why}</p>` : ''}
+      ${detail}
+    </div>
+  </div>`;
+}
+
+function renderEvents() {
+  const ev = state.events;
+  if (!ev || !ev.events) return '<section class="card"><h3>事件日历</h3>'
+    + '<p class="src">暂无事件日历数据（需先跑一次 warmup + score 生成 events.json）</p></section>';
+
+  const rows = evFiltered();
+  // 按日期分组
+  const groups = [];
+  for (const e of rows) {
+    const g = groups[groups.length - 1];
+    if (g && g.date === e.date) g.items.push(e);
+    else groups.push({ date: e.date, weekday: e.weekday, items: [e] });
+  }
+
+  const nh = ev.next_high;
+  const nhLine = nh ? `<p class="evnext">最近的高优先事件：
+      <b>${nh.date} ${nh.weekday || ''}${nh.time ? ' ' + nh.time : ''}</b>
+      ${nh.name}（${relDay(dayDiff(nh.date))}）</p>` : '';
+
+  const catSeg = EV_CATS.map(([k, lb]) =>
+    `<button data-c="${k}" class="${state.evCat === k ? 'on' : ''}">${lb}</button>`).join('');
+  const lvSeg = EV_LEVELS.map(([k, lb]) =>
+    `<button data-l="${k}" class="${Number(state.evLevel) === k ? 'on' : ''}">${lb}</button>`).join('');
+
+  const body = groups.length ? groups.map((g) => {
+    const n = dayDiff(g.date);
+    const cls = n < 0 ? ' past' : (n <= 2 ? ' soon' : '');
+    return `<div class="evday${cls}">
+      <div class="evdh"><b>${g.date.slice(5)}</b><em>${g.weekday || ''}</em>
+        <span class="evrel">${relDay(n)}</span>
+        <span class="evcnt">${g.items.length}</span></div>
+      ${g.items.map(evRow).join('')}
+    </div>`;
+  }).join('') : '<p class="src">当前筛选条件下没有事件</p>';
+
+  const c = ev.counts || {};
+  return `<section class="card">
+    <h3>事件日历 · ${rows.length} / ${ev.count} 条</h3>
+    ${nhLine}
+    <div class="seg wrap" id="evCatSeg">${catSeg}</div>
+    <div class="seg wrap" id="evLvSeg">${lvSeg}</div>
+    <div class="evlist">${body}</div>
+    <p class="src">★★★ 高优先（可能引起较大波动）：美联储议息 / 非农 / 美国 CPI·PCE /
+      中国 CPI·PPI·LPR·GDP / 政策会议 / 大额解禁。<br>
+      覆盖未来 ${ev.horizon_days || 120} 天、含近 ${ev.lookback_days || 7} 天回顾；
+      共 高 ${c.high ?? 0} / 中 ${c.mid ?? 0} / 低 ${c.low ?? 0} 条。<br>
+      来源：${(ev.sources || []).join('；')}。<br>
+      时间为北京时间；「惯例」标记的事件日期为惯例推算，以官方公告为准。</p>
+  </section>`;
+}
+
+/** tab 上的徽章：未来 7 天的高优先事件数 */
+function paintTabBadge() {
+  const btn = document.querySelector('#tabs button[data-view="events"]');
+  if (!btn) return;
+  const n = upcomingHigh(7).length;
+  btn.innerHTML = `事件日历${n ? `<i class="tabbadge">${n}</i>` : ''}`;
 }
 
 /* ==================== 回撤 / 涨幅列表 ==================== */
@@ -459,11 +583,14 @@ function renderSwingList() {
 
 const state = {
   idx: [], meta: {}, selected: [], current: null, version: '',
-  view: 'score',      // score | swing
+  view: 'score',      // score | swing | events
   win: 250,           // 回撤/涨幅的统计窗口（交易日）
   sort: 'dd',         // 回撤列表排序键
   levels: null,       // 大盘关键位（levels.json）
   idxSel: 0,          // 当前查看的指数下标
+  events: null,       // 事件日历（events.json）
+  evCat: 'all',       // 事件类别筛选
+  evLevel: 2,         // 事件优先级下限（默认只看 高 + 中，低优先靠筛选展开）
 };
 
 async function fetchJSON(path) {
@@ -494,10 +621,10 @@ async function renderCurrent() {
   $('#macro').innerHTML = renderMacroBar(state.meta);
   paintLevels();
 
-  // 回撤 / 涨幅视图：只重绘列表，不加载任何板块详情
-  if (state.view === 'swing') {
+  // 非评分视图（回撤 / 事件日历）：只重绘列表，不加载任何板块详情、不显示自选芯片
+  if (state.view !== 'score') {
     $('#chips').hidden = true;
-    $('#body').innerHTML = renderSwingList();
+    $('#body').innerHTML = state.view === 'events' ? renderEvents() : renderSwingList();
     return;
   }
   $('#chips').hidden = false;
@@ -613,6 +740,14 @@ async function boot() {
     state.levels = null;
   }
 
+  // 事件日历：同样允许失败（缺 events.json 时该视图给出提示，不影响其它视图）
+  try {
+    state.events = await fetchJSON(`${DATA}events.json`);
+  } catch {
+    state.events = null;
+  }
+  paintTabBadge();
+
   demoBanner(meta);   // 合成演示数据必须显著标注，避免误当真数据
 
   // 自选要按当前板块宇宙过滤：切换层级（如一级 31 → 二级 127）后，
@@ -652,6 +787,10 @@ async function boot() {
     if (w) { state.win = Number(w.dataset.w); renderCurrent(); return; }
     const s = e.target.closest('#sortSeg button');
     if (s) { state.sort = s.dataset.s; renderCurrent(); return; }
+    const c = e.target.closest('#evCatSeg button');
+    if (c) { state.evCat = c.dataset.c; renderCurrent(); return; }
+    const l = e.target.closest('#evLvSeg button');
+    if (l) { state.evLevel = Number(l.dataset.l); renderCurrent(); return; }
     const row = e.target.closest('.srow');
     if (row && row.dataset.code) {
       state.current = row.dataset.code;   // 临时查看，不改动自选

@@ -7,7 +7,8 @@
 - 每个交易日 **14:00** 自动评分（盘中快照），15:30 收盘复核归档
 - **板块评分视图**：12 维评分 + 宏观分组成决策矩阵，输出可执行动作而非单一信号
 - **回撤 / 涨幅视图**：逐板块的 20/60/250 日从高点回撤、从低点反弹、区间位置
-- **大盘关键位**：上证 / 沪深300 的周线·月线·年线压力位与支撑位
+- **大盘关键位**：上证 / 沪深300 的**日线**·周线·月线·年线压力位与支撑位（日线档给出「位置区 ×N」）
+- **事件日历**：未来 120 天的美联储议息 / 非农 / CPI·PCE / LPR / 政策会议 / 大额解禁，按优先级与类别筛选
 - 手机浏览器打开即用，可「添加到主屏幕」当 App 用
 - 全免费数据源，零服务器（GitHub Actions + GitHub Pages）
 
@@ -17,13 +18,14 @@
 
 | 文档 | 用途 | 什么时候看 |
 |---|---|---|
-| **[炒股工作台_交接文档_v2.0_20260916.md](炒股工作台_交接文档_v2.0_20260916.md)** | **现状与交接书**：实测数据通道、产物 schema、红线约定、运维手册、踩坑清单、待办 | **接手第一份就读它** |
+| **[炒股工作台_交接文档_v2.1_20260916.md](炒股工作台_交接文档_v2.1_20260916.md)** | **现状与交接书**：实测数据通道、产物 schema、红线约定、运维手册、踩坑清单、待办 | **接手第一份就读它** |
 | [部署与投产手册.md](部署与投产手册.md) | 从零把项目上线到 GitHub Pages 的完整步骤 | 要重新部署 / 换仓库时 |
 | [炒股工作台_交接文档_v1.0_20260911.md](炒股工作台_交接文档_v1.0_20260911.md) | 设计规格书（需求全景、评分维度设计意图） | 想了解「为什么这么设计」时 |
 | [backtest_report.md](backtest_report.md) | 回测报告（IC / 分层 / 多空），由 `pipeline/backtest.py` 生成 | 做权重校准时 |
 | [DISCLAIMER.md](DISCLAIMER.md) | 免责声明 | — |
 
 > 站点：**https://chuanwudi46-ops.github.io/Big-A/**　|　手机扫码：`手机访问二维码.png`
+> 交接文档 v2.0 已被 v2.1 完全取代（只多了「日线关键位」与「事件日历」两块），已删除以免看错版本。
 
 ---
 
@@ -31,8 +33,8 @@
 
 ```
 GitHub Actions（免费定时执行）
-  13:40  warmup  抓历史K线增量 / 解禁日历 / 新闻池
-  14:00  score   抓盘中快照 -> 12维评分 -> 生成 JSON
+  13:40  warmup  抓历史K线增量 / 解禁日历 / 新闻池 / 财经日历
+  14:00  score   抓盘中快照 -> 12维评分 -> 生成 JSON（大盘关键位 + 事件日历）
   15:30  close   用收盘价重算并归档
         ↓ 产物提交到仓库
 GitHub Pages（静态托管）
@@ -145,6 +147,7 @@ S = clamp(100 × Σ(w·f) − 筹码罚分, 0, 100)
 | 想改什么 | 改哪里 |
 |---|---|
 | 权重、分级阈值、宏观门槛 | `pipeline/config/weights.yaml` |
+| **事件日历的事件与优先级** | `pipeline/config/events_rules.json`（规则按顺序匹配，第一条命中即用；`curated` 存惯例政策会议） |
 | 负面清单（可手动增删） | `pipeline/config/keywords_seed.json` 的 `blacklist`，改完重跑 `sync_boards.py` |
 | 板块关键词 / 出清阶段 | `pipeline/config/keywords_seed.json` |
 | 评分时点 | `.github/workflows/daily.yml` 的 cron（UTC 时间，北京时间 = UTC+8） |
@@ -168,6 +171,12 @@ python pipeline/main.py --stage warmup
 python pipeline/main.py --stage score
 python pipeline/main.py --stage score --force     # 忽略交易日判断
 python pipeline/main.py --stage warmup --rebuild-map   # 强制重建个股-板块映射
+
+# 事件日历：改完 events_rules.json 直接跑它看结果（会回源拉日历并打印全部事件）
+python pipeline/events.py
+
+# 大盘关键位（日/周/月/年四档）
+python pipeline/levels.py
 
 # 本地预览前端
 cd web && python -m http.server 8080
@@ -209,6 +218,7 @@ python pipeline/backtest.py --horizons 3,10,30 --quantiles 5
 | 板块日 K 线 | **腾讯 → 东财直连 → akshare** | 腾讯的 `newfqkline/get` 是唯一可用通道 |
 | 板块快照 / 成分股 | 东财 `push2delay` clist 直连 | `push2` 在境内外都不可用 |
 | 高管持股变动 | `datacenter-web` + 服务端 `filter` | 直连 0.98 s；akshare 同数据要 8 分 49 秒 |
+| **财经日历（事件日历）** | `datacenter-web` 的 **`RPT_CPH_FECALENDAR`** 报表 | 4 个月区间 1543 条 / 1.29 s；报表名从 `data.eastmoney.com/cjrl` 的页面 JS 里挖出来的 |
 
 实测可达性：
 
@@ -223,7 +233,7 @@ python pipeline/backtest.py --horizons 3,10,30 --quantiles 5
 
 > ⚠️ **不要以为「CI 在境外所以东财更好访问」** —— 恰恰相反，东财对境外出口有地区封锁。
 > 遇到抓不到数据，先按上表确认走的是哪条通道，而不是换网络重试。
-> 完整的探针结论与排查方法见交接文档 v2.0 第 4 节。
+> 完整的探针结论与排查方法见交接文档 v2.1 第 4 节。
 
 如果所有通道都失败：
 
@@ -252,6 +262,7 @@ python pipeline/backtest.py --horizons 3,10,30 --quantiles 5
 | 行业资金流 | akshare `stock_sector_fund_flow_rank` |
 | 新闻 | akshare（财联社电报 / 东财 7×24） |
 | 限售解禁 | akshare `stock_restricted_release_detail_em` |
+| **财经日历（事件日历）** | **东方财富 `RPT_CPH_FECALENDAR` 报表**（真实事件表）<br>+ 规则推算（股指期货交割日）+ `release.parquet`（解禁）+ 人工惯例清单 |
 | 行业估值 | tushare `index_dailybasic` |
 | 盘中实时快照 | 东方财富 `push2.eastmoney.com`（JSONP 直连） |
 

@@ -9,9 +9,9 @@
    浏览器只在 sw.js 字节变化时才重装 SW —— 改 UI 却不改 sw.js 时，
    已装过 PWA 的用户会一直看到旧界面且毫无报错。发布 UI 改动时**务必同步
    改 VERSION**（sw.js 字节随之变化，触发 SW 重装 + 清旧缓存）。
-   当前 VERSION 对应：申万二级 120 板块 + 大盘关键位 + 回撤/涨幅视图。
+   当前 VERSION 对应：申万二级 120 板块 + 大盘关键位（日/周/月/年）+ 回撤/涨幅 + 事件日历。
 */
-const VERSION = 'wb-v2';
+const VERSION = 'wb-v3';
 const STATIC_ASSETS = [
   './',
   './index.html',

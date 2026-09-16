@@ -345,24 +345,36 @@ def _tencent_board_hist(name: str, start: str, end: str, count: int = 800,
 
 def _datacenter_page(report: str, since_col: str | None, since: str | None,
                      sort_columns: str, page_size: int = 500,
-                     max_pages: int = 30) -> pd.DataFrame:
+                     max_pages: int = 30,
+                     until_col: str | None = None, until: str | None = None,
+                     dedupe_on: str | None = None) -> pd.DataFrame:
     """东财数据中心通用分页取数。
 
     since_col/since 非空时下发服务端日期过滤 —— 这是性能关键：
     RPT_EXECUTIVE_HOLD_DETAILS 全量有 344 页（约 9 分钟），
     过滤到近 45 天后只剩 1~3 页（约 0.3 秒）。
+    until_col/until 是同一套过滤的「上界」（<=），财经日历取未来区间时要用。
 
-    坑：sortTypes 的个数必须与 sortColumns 完全一致，否则接口返回
+    坑 1：sortTypes 的个数必须与 sortColumns 完全一致，否则接口返回
     `{"result": null, "message": "排序字段和顺序数量不一致"}`，且 HTTP 仍是 200。
+    坑 2：**分页必须带一个唯一性排序键**。只按 START_DATE 排序时，同一天有几百条
+    记录，翻页边界上服务端每次返回的顺序可能不同 → 跨页重复/漏条
+    （与 clist 用 f3 排序掉块是同一类问题）。故调用方应传 "START_DATE,FE_CODE"
+    这类「日期 + 唯一码」的组合键，并用 dedupe_on 指定唯一列做兜底去重。
     """
     from urllib.parse import urlencode
 
     sort_cols = [c for c in sort_columns.split(",") if c]
+    conds = []
+    if since_col and since:
+        conds.append(f"({since_col}>='{since}')")
+    if until_col and until:
+        conds.append(f"({until_col}<='{until}')")
     base = {
         "reportName": report,
         "columns": "ALL",
         "quoteColumns": "",
-        "filter": f"({since_col}>='{since}')" if since_col and since else "",
+        "filter": "".join(conds),
         "pageNumber": "1", "pageSize": str(page_size),
         # 主列降序、其余升序，与 sortColumns 一一对应
         "sortTypes": ",".join(["-1"] + ["1"] * (len(sort_cols) - 1)),
@@ -370,6 +382,7 @@ def _datacenter_page(report: str, since_col: str | None, since: str | None,
         "source": "WEB", "client": "WEB",
         "p": "1", "pageNo": "1", "pageNum": "1",
     }
+    cols: list[str] = []
     frames: list[pd.DataFrame] = []
     total: int | None = None
     got = 0
@@ -400,7 +413,46 @@ def _datacenter_page(report: str, since_col: str | None, since: str | None,
             break
     if not frames:
         raise RuntimeError(f"{report} 返回空数据")
-    return pd.concat(frames, ignore_index=True)
+    out = pd.concat(frames, ignore_index=True)
+    # 只在显式给出唯一键时才去重：这是「翻页边界串位」的兜底，不是常规清洗。
+    # 不默认去重是为了不改变既有的 share_change 取数语义（该路径做过严格等价验证）。
+    if dedupe_on and dedupe_on in out.columns:
+        out = out.drop_duplicates(subset=[dedupe_on]).reset_index(drop=True)
+    return out
+
+
+# 东财「财经日历」报表名（2026-09-16 从 data.eastmoney.com/cjrl 的前端 JS 里挖出来的，
+# 不是猜的：报表配置名写错时接口会回 `报表配置不存在`）。
+CALENDAR_REPORT = "RPT_CPH_FECALENDAR"
+
+
+def econ_calendar(start: str, end: str) -> pd.DataFrame:
+    """东财财经日历：未来 (start, end] 区间的真实事件表。
+
+    覆盖内容实测包含：各国经济数据（美国 CPI / 非农 / 核心 PCE / ISM / GDP、
+    中国 LPR / PMI / GDP）、央行议息会议（美联储 / 日本 / 英国 / 欧洲 / 澳洲）、
+    行业与政策会议、新股申购、MLF 到期等。
+
+    入参 start/end 为 YYYY-MM-DD。返回列：
+        date / name / type / city / sponsor / code
+    刻意**不带 CONTENT**：那是最长的一列（单条几千字），落盘与入 git 的成本都在它身上，
+    而事件日历只用得到标题与时间；实测剔除后 parquet 体积降到约 1/10。
+    """
+    raw = _datacenter_page(CALENDAR_REPORT, "START_DATE", start,
+                           "START_DATE,FE_CODE", page_size=500, max_pages=8,
+                           until_col="START_DATE", until=end, dedupe_on="FE_CODE")
+    df = pd.DataFrame({
+        "date": pd.to_datetime(raw.get("START_DATE"), errors="coerce"),
+        "name": raw.get("FE_NAME", pd.Series(dtype=str)).astype(str),
+        "type": raw.get("FE_TYPE", pd.Series(dtype=str)).fillna("").astype(str),
+        "city": raw.get("CITY", pd.Series(dtype=str)).fillna("").astype(str),
+        "sponsor": raw.get("SPONSOR_NAME", pd.Series(dtype=str)).fillna("").astype(str),
+        "code": raw.get("FE_CODE", pd.Series(dtype=str)).astype(str),
+    })
+    return (df.dropna(subset=["date"])
+              .drop_duplicates(subset=["code"])
+              .sort_values("date")
+              .reset_index(drop=True))
 
 
 def _direct_share_change(days: int = SHARE_WINDOW_DAYS) -> pd.DataFrame:

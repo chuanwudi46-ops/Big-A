@@ -26,6 +26,7 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import chips                 # noqa: E402
+import events as EV          # noqa: E402
 import factors as F          # noqa: E402
 import levels                # noqa: E402
 import macro as M            # noqa: E402
@@ -148,6 +149,16 @@ def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
     _write_parquet("margin.parquet", sources.margin_balance())
     _write_parquet("lpr.parquet", sources.lpr())
     _write_parquet("sf.parquet", sources.social_financing())
+
+    # ---- 财经日历（真实事件表：美联储议息 / 非农 / CPI / LPR / 政策会议 …）
+    # 多取到未来 200 天（> 产物 horizon 的 120 天）：留出富余，这样即使某天
+    # warmup 失败，score 用旧日历也还能覆盖住整个展示窗口。
+    try:
+        _write_parquet("events_raw.parquet", sources.econ_calendar(
+            (dt.date.today() - dt.timedelta(days=10)).strftime("%Y-%m-%d"),
+            (dt.date.today() + dt.timedelta(days=200)).strftime("%Y-%m-%d")))
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] econ calendar: {str(e)[:120]}")
 
     # ---- 基准指数（沪深300 / 上证，用于量价与情绪）
     try:
@@ -409,6 +420,23 @@ def stage_score(w: dict, meta: dict) -> None:
         print(f"[score] 大盘关键位：{head}")
     except Exception as e:  # noqa: BLE001
         print(f"[warn] levels: {str(e)[:140]}")
+
+    # ---- 事件日历（未来可能引起较大波动的事件：美联储议息 / 非农 / CPI / 政策会议 / 解禁…）
+    # 原始日历由 warmup 落盘；缺失时 events.build 会回源，单跑 score 也能出这份产物
+    try:
+        ev_cfg = EV.load_rules()
+        raw_ev = _read_parquet("events_raw.parquet")
+        if raw_ev.empty:
+            print("[warn] 缺 events_raw.parquet，回源拉取财经日历")
+            raw_ev = EV.load_calendar()
+        rep = EV.build(raw_ev, ev_cfg, dt.date.today(), rel)
+        _dump(DATA / "events.json", rep)
+        nh = rep.get("next_high") or {}
+        print(f"[score] 事件日历 {rep['count']} 条（高 {rep['counts']['high']} / "
+              f"中 {rep['counts']['mid']} / 低 {rep['counts']['low']}）"
+              f"｜最近高优先 {nh.get('date', '')} {nh.get('name', '')}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] events: {str(e)[:140]}")
 
     arc = DATA / "archive" / now.strftime("%Y/%m")
     _dump(arc / f"{now.strftime('%Y%m%d_%H%M')}.json", {

@@ -70,11 +70,90 @@ if (!fs.existsSync(lvFp)) {
   for (const p of I.periods) {
     ok(html.includes(p.label), `levels 卡片含「${p.label}」行`);
   }
+  // 日线档是 2026-09-16 新增的：必须有，且 must be the first row
+  const keys = I.periods.map((p) => p.key);
+  ok(keys.includes('day'), 'levels 含日线档（key=day）', keys.join('/'));
+  ok(keys[0] === 'day', '日线档排在第一位');
+  const dayp = I.periods.find((p) => p.key === 'day');
+  ok(dayp && dayp.bars === 120, '日线档回看 120 根', dayp ? String(dayp.bars) : 'missing');
+  ok(dayp && (dayp.resistance.length + dayp.support.length) > 0,
+    '日线档至少有一档压力或支撑',
+    dayp ? `压力 ${dayp.resistance.length} / 支撑 ${dayp.support.length}` : 'missing');
+  const lvLen = dayp ? dayp.resistance.length + dayp.support.length : 0;
+  const lvHi = dayp ? dayp.resistance.filter((x) => x.gap_pct > 0).length +
+                      dayp.support.filter((x) => x.gap_pct < 0).length : 0;
+  ok(lvLen > 0 && lvLen === lvHi, '日线压力全部在现价上方、支撑全部在下方',
+    `${lvHi}/${lvLen}`);
   ok(/lv-res/.test(html) || /lv-none/.test(html), '压力位单元格已渲染（有档位或"上方无压力"）');
   ok(/lv-sup/.test(html) || /lv-none/.test(html), '支撑位单元格已渲染');
   ok((I.summary?.text || '').length === 0 || html.includes(I.summary.text.slice(0, 12)),
     '综合结论文案已渲染');
   ok(/lv-pos/.test(html), '区间位置行已渲染');
+  // 日线位置区标记：只在有 touches>1 时出现，出现了就必须渲染出来
+  const touched = (dayp ? dayp.resistance.concat(dayp.support) : [])
+    .filter((x) => x.touches > 1);
+  ok(touched.length === 0 || /lvtouch/.test(html),
+    '日线「位置区 ×N」标记已渲染', `带 touches 的档位 ${touched.length} 个`);
+}
+
+/* ---------- 2b. 事件日历 ---------- */
+const evFp = path.join(DATA, 'events.json');
+if (!fs.existsSync(evFp)) {
+  console.log('! 缺少 web/data/events.json，跳过（先跑一次 pipeline）');
+} else {
+  const ev = JSON.parse(fs.readFileSync(evFp, 'utf8'));
+  ctx.__ev = ev;
+  vm.runInContext('state.events = __ev; state.evCat = "all"; state.evLevel = 2;', ctx);
+
+  ok(Array.isArray(ev.events) && ev.events.length > 0, 'events.json 含事件列表',
+    `${ev.events?.length} 条`);
+  ok(ev.sources && ev.sources.length > 0, 'events.json 标注了数据来源');
+  const badField = ev.events.find((e) => !e.date || !e.name || !e.cat
+    || ![1, 2, 3].includes(e.level) || !e.src);
+  ok(!badField, '每条事件都有 date/name/cat/level/src',
+    badField ? JSON.stringify(badField).slice(0, 90) : '');
+  const badDate = ev.events.find((e) => !/^\d{4}-\d{2}-\d{2}$/.test(e.date));
+  ok(!badDate, '事件日期均为 YYYY-MM-DD 格式', badDate ? badDate.date : '');
+  const capped = ev.events.filter((e) => e.level >= 2).length;
+  ok(ev.events.length <= 400, '事件条数在合理上限内', `${ev.events.length} 条（高+中 ${capped}）`);
+  const future = ev.events.filter((e) => e.date >= ev.as_of);
+  ok(future.length > 0, '存在未来事件', `${future.length} 条`);
+
+  // 高优先事件里应该能覆盖用户最关心的四类
+  const all = ev.events.map((e) => e.name + (e.detail || []).join(' ')).join(' ');
+  for (const kw of ['美联储', '非农', 'CPI', 'LPR']) {
+    ok(all.includes(kw), `高优先事件覆盖「${kw}」`);
+  }
+
+  const html = vm.runInContext('renderEvents()', ctx);
+  ok(html.includes('事件日历'), '事件日历卡片已渲染');
+  ok(html.includes('id="evCatSeg"') && html.includes('id="evLvSeg"'),
+    '事件筛选控件（类别 / 优先级）已渲染');
+  const n3 = ev.events.filter((e) => e.level >= 3).length;
+  const shown = (html.match(/class="ev lv/g) || []).length;
+  ok(n3 === 0 || shown >= n3, '高优先事件全部渲染出来',
+    `渲染 ${shown} 行 / 高优先 ${n3} 条`);
+  const days = (html.match(/class="evday/g) || []).length;
+  ok(days > 0, '事件按日期分组渲染', `${days} 组`);
+
+  // 优先级筛选：只显示高优先时行数必须变少且不含 lv1
+  vm.runInContext('state.evLevel = 3;', ctx);
+  const h3 = vm.runInContext('renderEvents()', ctx);
+  ok(!/class="ev lv1/.test(h3) && !/class="ev lv2/.test(h3),
+    '「仅高」筛选下不出现中/低优先事件');
+  vm.runInContext('state.evLevel = 1;', ctx);
+  const h1 = vm.runInContext('renderEvents()', ctx);
+  ok((h1.match(/class="ev lv/g) || []).length >= shown, '「全部」筛选下事件不少于默认筛选');
+  // 类别筛选
+  vm.runInContext('state.evLevel = 2; state.evCat = "us";', ctx);
+  const hus = vm.runInContext('renderEvents()', ctx);
+  ok(!/evcat cn/.test(hus) && !/evcat market/.test(hus), '「美国」筛选下不出现其它类别');
+  vm.runInContext('state.evCat = "all";', ctx);
+
+  // tab 徽章：未来 7 天的高优先事件数
+  vm.runInContext('paintTabBadge()', ctx);
+  const badge = vm.runInContext('upcomingHigh(7).length', ctx);
+  ok(Number.isInteger(badge), 'tab 徽章统计可用（未来 7 天高优先事件）', `${badge} 条`);
 }
 
 /* ---------- 3. 回撤 / 涨幅列表 ---------- */

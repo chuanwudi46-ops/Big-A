@@ -8,8 +8,16 @@
 都高，它就是一个结构高点，构成上方压力；低点反之。
 
 为什么要分周期：同一个点位在不同级别上的意义完全不同。
-周线前高是短线压力，月线/年线前高是中期天堑 —— 分开列才看得清路。
-日线级别的噪音太大（几乎每天都有新高新低），所以不做日线档。
+**日线**前高是当天/当周就要面对的一线位置，周线前高是短线压力，
+月线/年线前高是中期天堑 —— 分开列才看得清路。
+
+日线档怎么做才不噪音（2026-09-16 补）：
+裸的日线摆动点几乎天天都有，直接把 k=2 的摆动点列出来会得到一堆相距
+0.1% 的「压力位」，等于没有。故日线档做两件事：
+  1) 摆动识别窗口放大到 **k=5**（左右各 5 根），只留真正的结构高低点；
+  2) 同价位**聚类合并**（默认 0.8% 内算同一个位置区），合并后取「离现价最近」
+     的那一档，并把命中次数记为 `touches`（被反复测试 3 次的位置显然比
+     只碰过一次的更硬）。周线/月线/年线保持 merge_pct=0，输出与历史完全一致。
 
 产物：web/data/levels.json，供前端渲染「大盘位置」卡片。
 """
@@ -21,13 +29,19 @@ import pathlib
 
 import pandas as pd
 
-# 各周期的回看根数与摆动识别窗口 (左, 右)
-# 周线看 2 年、月线看 5 年、年线看 10 年；年线本身只有几根，k 取 1 即可
+# 各周期的 (key, 标签, 回看根数, 摆动识别窗口 k, 同价位聚类阈值 %, 最多档数)
+# 周线看 2 年、月线看 5 年、年线看 10 年；年线本身只有几根，k 取 1 即可。
+# 日线看约半年（120 根）：太短则整段都在一个箱体里、太长则远端的点位已失效。
+# 只有日线需要聚类（merge_pct>0），其余周期保持 0 = 与历史输出逐字节一致。
 PERIODS = [
-    ("week", "周线", 104, 2),
-    ("month", "月线", 60, 2),
-    ("year", "年线", 10, 1),
+    ("day", "日线", 120, 5, 0.8, 3),
+    ("week", "周线", 104, 2, 0.0, 3),
+    ("month", "月线", 60, 2, 0.0, 3),
+    ("year", "年线", 10, 1, 0.0, 3),
 ]
+
+# 一根 bar 覆盖多少个交易日：用于把「回看根数」换算成年，仅供提示文案使用
+BARS_PER_YEAR = {"day": 252, "week": 52, "month": 12, "year": 1}
 
 INDICES = [
     ("sh000001", "上证指数"),
@@ -73,6 +87,13 @@ def to_bars(df: pd.DataFrame, kind: str) -> pd.DataFrame:
     if df.empty:
         return df
     d = pd.to_datetime(df["date"])
+    if kind == "day":
+        # 日线不聚合，但补出 start/end 两列（period_levels 用它们取日期），
+        # 语义与聚合后的 bar 保持一致：start = end = 该日
+        out = df.copy()
+        out["start"] = d.values
+        out["end"] = d.values
+        return out.reset_index(drop=True).sort_values("end").reset_index(drop=True)
     if kind == "week":
         key = d.dt.strftime("%G-%V")          # ISO 年-周，跨年周不会串
     elif kind == "month":
@@ -118,7 +139,47 @@ def swing_points(bars: pd.DataFrame, k: int = 2) -> list[dict]:
     return out
 
 
-def period_levels(bars: pd.DataFrame, close: float, k: int, top: int = 3) -> dict:
+def cluster_levels(pts: list[dict], close: float, tol_pct: float) -> list[dict]:
+    """把相邻（价差 <= tol_pct%）的同类型摆动点合并成一个「位置区」。
+
+    只在日线档使用。合并规则：
+    - 按价格排序后贪心聚簇，同一簇内只保留**离现价最近**的那一档 ——
+      实盘最先碰到的是它，更远的同簇点位暂不构成独立参考；
+    - `touches` 记录该位置区被测试过几次（越多越硬，前端会标出来）；
+    - 日期取簇内**最近一次**测试的日期（最新证据优先）；
+    - 额外给出 price_lo / price_hi，让前端能显示这是一个区间而不是一个点。
+    """
+    if tol_pct <= 0 or len(pts) <= 1:
+        return pts
+    out: list[dict] = []
+    for kind in ("high", "low"):
+        grp = sorted([p for p in pts if p["kind"] == kind], key=lambda p: p["price"])
+        if not grp:
+            continue
+        cur = [grp[0]]
+        for p in grp[1:]:
+            base = cur[-1]["price"]
+            if base > 0 and (p["price"] - base) / base * 100.0 <= tol_pct:
+                cur.append(p)
+            else:
+                out.append(_merge(cur, close))
+                cur = [p]
+        out.append(_merge(cur, close))
+    return out
+
+
+def _merge(group: list[dict], close: float) -> dict:
+    best = min(group, key=lambda p: abs(p["price"] - close))
+    m = dict(best)
+    m["touches"] = len(group)
+    m["price_lo"] = round(min(p["price"] for p in group), 2)
+    m["price_hi"] = round(max(p["price"] for p in group), 2)
+    m["date"] = max(p["date"] for p in group)      # 最近一次被测试的日期
+    return m
+
+
+def period_levels(bars: pd.DataFrame, close: float, k: int,
+                  top: int = 3, merge_pct: float = 0.0) -> dict:
     """一个周期上的压力位 / 支撑位。
 
     只在**现价之上**找压力、**现价之下**找支撑 —— 这是关键：把下方的
@@ -149,6 +210,7 @@ def period_levels(bars: pd.DataFrame, close: float, k: int, top: int = 3) -> dic
     for p in pts:
         uniq.setdefault((p["kind"], round(p["price"], 2)), p)
     pts = list(uniq.values())
+    pts = cluster_levels(pts, close, merge_pct)      # merge_pct=0 时原样返回
 
     res = sorted([p for p in pts if p["kind"] == "high" and p["price"] > close],
                  key=lambda p: p["price"])[:top]
@@ -157,10 +219,15 @@ def period_levels(bars: pd.DataFrame, close: float, k: int, top: int = 3) -> dic
 
     def fmt(p: dict) -> dict:
         gap = (p["price"] / close - 1) * 100
-        return {"price": round(p["price"], 2),
-                "gap_pct": round(gap, 2),
-                "date": p["date"],
-                "near": abs(gap) < 0.3}
+        out = {"price": round(p["price"], 2),
+               "gap_pct": round(gap, 2),
+               "date": p["date"],
+               "near": abs(gap) < 0.3}
+        # touches>1 才输出：代表这是一个被反复测试的「位置区」，不是单点
+        if p.get("touches", 1) > 1:
+            out["touches"] = int(p["touches"])
+            out["zone"] = [p["price_lo"], p["price_hi"]]
+        return out
 
     span = rng_high - rng_low
     return {
@@ -192,6 +259,14 @@ def position_text(pos: float | None) -> str:
     return "区间下沿"
 
 
+def _high_phrase(p: dict) -> str:
+    """「创新高」的说法按周期换算：日线说交易日数，其余说年数"""
+    bars = int(p.get("bars") or 0)
+    if p.get("key") == "day":
+        return f"创 {bars} 个交易日新高"
+    return f"创近 {max(1, round(bars / BARS_PER_YEAR.get(p['key'], 1)))} 年新高"
+
+
 def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
     """对单个指数出一份多周期关键位报告"""
     df = normalize(daily)
@@ -201,12 +276,12 @@ def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
     prev = float(df["close"].iloc[-2]) if len(df) > 1 else close
 
     periods = []
-    for kind, label, lookback, k in PERIODS:
+    for kind, label, lookback, k, merge_pct, top in PERIODS:
         bars = to_bars(df, kind)
         if bars.empty:
             continue
         seg = bars.tail(lookback).reset_index(drop=True)
-        lv = period_levels(seg, close, k)
+        lv = period_levels(seg, close, k, top=top, merge_pct=merge_pct)
         if not lv:
             continue
         lv["position_text"] = position_text(lv.get("position"))
@@ -243,11 +318,20 @@ def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
     notes = []
     for p in periods:
         if p["at_range_high"]:
-            span_years = max(1, round(p["bars"] / (52 if p["key"] == "week" else
-                                                   12 if p["key"] == "month" else 1)))
-            notes.append(f"已站上{p['label']}区间上沿（近 {span_years} 年新高）")
+            notes.append(f"已站上{p['label']}区间上沿（{_high_phrase(p)}）")
         elif p["at_range_low"]:
             notes.append(f"处于{p['label']}区间下沿")
+    # 日线是唯一做了「同价位聚类」的档位：touches>1 说明这是被反复测试的位置区，
+    # 比单点更硬，值得单独提示（后端只会为日线输出 touches 字段）
+    dayp = next((p for p in periods if p["key"] == "day"), None)
+    if dayp:
+        for word, arr in (("压力", dayp["resistance"]), ("支撑", dayp["support"])):
+            hit = next((x for x in arr if x.get("touches", 1) > 1), None)
+            if hit:
+                lo, hi = hit["zone"]
+                notes.append(f"日线{word} {hit['price']} 为位置区（{lo}~{hi}，"
+                             f"{hit['touches']} 次测试，最近 {hit['date']}）")
+                break
     nres = summary["nearest_resistance"]
     if nres and nres["near"]:
         notes.append(f"上方 {nres['price']} 为{nres['period']}关键前高"
