@@ -96,30 +96,69 @@ function ls(key, fallback) {
 }
 function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
-/* ================== 实时补丁：1 次请求拿全部板块快照 ================== */
+/* ================== 实时补丁：拉全部行业板块快照 ==================
+   两个必须遵守的接口事实（踩过坑，勿改）：
+   1) clist 单页 pz 被服务端硬截断到 100 —— 必须按 total 翻页，否则 496 个
+      板块只拿到前 100 个，自选板块很可能不在其中、实时补丁静默失效。
+   2) secids 参数在 clist 上不可用（rc:102 / data:null），只能全量拉再本地索引。
+   3) push2 = 实时行情（手机首选）；push2delay = 延时行情（海外 runner 才需要，
+      手机端仅作兜底）。顺序不能反，否则盘中看到的是延时价。
+   ================================================================= */
+const LIVE_HOSTS = ['push2.eastmoney.com', 'push2delay.eastmoney.com'];
+const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f104,f105';
+const LIVE_PAGE = 100;               // 服务端硬上限，改大无效
+
+function liveURL(host, pn) {
+  return `https://${host}/api/qt/clist/get`
+    + `?pn=${pn}&pz=${LIVE_PAGE}&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2`
+    + `&fields=${LIVE_FIELDS}`;
+}
+
+/** 拉一页，返回 { rows, total } */
+async function livePage(host, pn) {
+  const d = await jsonp(liveURL(host, pn));
+  const data = d?.data || {};
+  return { rows: data.diff || [], total: data.total || 0 };
+}
+
+/** 翻页拉全量（首屏拿到 total 后再并发补齐剩余页） */
+async function liveAll(host) {
+  const first = await livePage(host, 1);
+  if (!first.rows.length) throw new Error('empty');
+  const pages = Math.ceil(Math.min(first.total, 800) / LIVE_PAGE);
+  if (pages <= 1) return first.rows;
+  const rest = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, i) =>
+      livePage(host, i + 2).then((r) => r.rows).catch(() => []))
+  );
+  return first.rows.concat(...rest);
+}
+
 async function liveSnapshot() {
-  const cached = await Store.get('snap');
+  const cached = await Store.get('snap2');
   if (cached && Date.now() - cached.ts < SNAP_TTL) return cached.rows;
 
-  const url = 'https://push2.eastmoney.com/api/qt/clist/get'
-    + '?pn=1&pz=600&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2'
-    + '&fields=f2,f3,f8,f12,f14,f62,f104,f105';
-  try {
-    const d = await jsonp(url);
-    const rows = (d?.data?.diff || []).map((r) => ({
-      code: String(r.f12),
-      price: r.f2,
-      pct: r.f3,
-      turnover: r.f8,
-      up: r.f104,
-      down: r.f105,
-      mainInflow: r.f62,
-    }));
-    await Store.set('snap', { ts: Date.now(), rows });
-    return rows;
-  } catch {
-    return cached?.rows || [];      // 失败回退旧快照，不阻断渲染
+  for (const host of LIVE_HOSTS) {
+    try {
+      const raw = await liveAll(host);
+      const rows = raw
+        .filter((r) => r && r.f12 && r.f14)
+        .map((r) => ({
+          code: String(r.f12),
+          name: r.f14,
+          price: r.f2,
+          pct: r.f3,
+          turnover: r.f8,
+          up: r.f104,
+          down: r.f105,
+          mainInflow: r.f62,
+        }));
+      if (!rows.length) continue;
+      await Store.set('snap2', { ts: Date.now(), rows, host });
+      return rows;
+    } catch { /* 换下一个域名 */ }
   }
+  return cached?.rows || [];      // 全失败则回退旧快照，不阻断渲染
 }
 
 /** 把实时数据折算成对静态评分的微调（只动与当日强相关的三个因子） */
