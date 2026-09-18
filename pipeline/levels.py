@@ -29,6 +29,8 @@ import pathlib
 
 import pandas as pd
 
+import clock
+
 # 各周期的 (key, 标签, 回看根数, 摆动识别窗口 k, 同价位聚类阈值 %, 最多档数)
 # 周线看 2 年、月线看 5 年、年线看 10 年；年线本身只有几根，k 取 1 即可。
 # 日线看约半年（120 根）：太短则整段都在一个箱体里、太长则远端的点位已失效。
@@ -359,7 +361,7 @@ def build(index_daily) -> dict:
     if not out:
         raise RuntimeError("所有指数关键位均计算失败")
     return {
-        "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated": clock.now().strftime("%Y-%m-%d %H:%M:%S"),
         "indices": out,
     }
 

@@ -26,6 +26,7 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import chips                 # noqa: E402
+import clock                 # noqa: E402
 import events as EV          # noqa: E402
 import factors as F          # noqa: E402
 import levels                # noqa: E402
@@ -123,8 +124,8 @@ def _hist_one(b: dict, start: str, end: str) -> str:
 def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
     """预热：抓历史 K 线（增量）、板块映射、宏观原始数据、新闻、解禁/减持"""
     CACHE.mkdir(parents=True, exist_ok=True)
-    end = dt.date.today().strftime("%Y%m%d")
-    start = (dt.date.today() - dt.timedelta(days=560)).strftime("%Y%m%d")
+    end = clock.today().strftime("%Y%m%d")
+    start = (clock.today() - dt.timedelta(days=560)).strftime("%Y%m%d")
 
     # ---- 板块历史 K 线（增量，并发）
     boards = meta["boards"]
@@ -142,7 +143,7 @@ def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
 
     # ---- 筹码原始数据
     _write_parquet("release.parquet", sources.release_calendar(
-        end, (dt.date.today() + dt.timedelta(days=180)).strftime("%Y%m%d")))
+        end, (clock.today() + dt.timedelta(days=180)).strftime("%Y%m%d")))
     _write_parquet("share_change.parquet", sources.share_change())
 
     # ---- 宏观原始数据
@@ -155,8 +156,8 @@ def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
     # warmup 失败，score 用旧日历也还能覆盖住整个展示窗口。
     try:
         _write_parquet("events_raw.parquet", sources.econ_calendar(
-            (dt.date.today() - dt.timedelta(days=10)).strftime("%Y-%m-%d"),
-            (dt.date.today() + dt.timedelta(days=200)).strftime("%Y-%m-%d")))
+            (clock.today() - dt.timedelta(days=10)).strftime("%Y-%m-%d"),
+            (clock.today() + dt.timedelta(days=200)).strftime("%Y-%m-%d")))
     except Exception as e:  # noqa: BLE001
         print(f"[warn] econ calendar: {str(e)[:120]}")
 
@@ -211,9 +212,11 @@ def _prefetch_cons(boards: list[dict]) -> dict[str, pd.DataFrame]:
     return out
 
 
-def stage_score(w: dict, meta: dict) -> None:
-    now = dt.datetime.now()
-    intraday = bool(w.get("intraday", {}).get("mark", True)) and now.hour < 15
+def stage_score(w: dict, meta: dict, full_archive: bool = False) -> None:
+    # 北京时间（绝不能用 dt.datetime.now()：CI runner 是 UTC，会把 15:43 写成 07:43，
+    # 并让下面的盘中判定恒为真 —— 见 clock.py）
+    now = clock.now()
+    intraday = bool(w.get("intraday", {}).get("mark", True)) and clock.is_intraday(now.time())
 
     try:
         snap = sources.board_snapshot()
@@ -429,7 +432,7 @@ def stage_score(w: dict, meta: dict) -> None:
         if raw_ev.empty:
             print("[warn] 缺 events_raw.parquet，回源拉取财经日历")
             raw_ev = EV.load_calendar()
-        rep = EV.build(raw_ev, ev_cfg, dt.date.today(), rel)
+        rep = EV.build(raw_ev, ev_cfg, clock.today(), rel)
         _dump(DATA / "events.json", rep)
         nh = rep.get("next_high") or {}
         print(f"[score] 事件日历 {rep['count']} 条（高 {rep['counts']['high']} / "
@@ -438,56 +441,74 @@ def stage_score(w: dict, meta: dict) -> None:
     except Exception as e:  # noqa: BLE001
         print(f"[warn] events: {str(e)[:140]}")
 
-    arc = DATA / "archive" / now.strftime("%Y/%m")
-    _dump(arc / f"{now.strftime('%Y%m%d_%H%M')}.json", {
-        "updated": now.isoformat(timespec="seconds"),
-        "intraday": intraday,
-        "macro_score": m,
-        "macro_detail": {"liquidity": round(liq, 3), "volume_price": round(vp, 3),
-                         "policy": round(pol, 3), "sentiment": round(sent, 3)},
-        "boards": scored,
-        # 真实数据显式标记，与 make_demo.py 的 demo=true 对应；
-        # backtest.load_snapshots 据此剔除合成快照
-        "demo": False,
-    })
-
-    # ---- 轻量「分数矩阵」快照（跨日 IC 评估用；开关见 weights.yaml 的 archive 段）
-    # 为什么非写不可：整份归档每天写多份、但都挤在**同一天**，backtest 按日期去重后
-    # 样本数恒为 1，「样本不足」是结构性的（见 docs/backtest_report_hist.md §6.5.0）。
-    # 这份 summary 只有 code/name/score(+factors)，几 KB，让跨日样本真正积累。
-    # 文件名带 _summary 后缀，backtest.load_snapshots 认得它，且**同一天以整份快照优先**。
-    # 必须同样带 demo 标记：与整份归档同款约定，否则合成数据会污染 IC。
+    # ---- 归档策略（weights.yaml 的 archive 段）
+    # 为什么默认「只在 close 阶段归档」：整份快照约 200 KB/次，而盘中已改成每 30 分钟
+    # 跑一次 —— 每次都归档的话一年要往 git 里堆约 640 MB。但 backtest.load_snapshots
+    # 是**按日期去重**的，且同一天里「整份快照」优先于 summary，所以盘中多写的那几份
+    # 对 IC 没有任何增量，纯粹撑仓库。改成 close 一天一份：样本数仍为 1 天 1 份，
+    # 与「跨日积累样本」的需求完全一致，仓容却降到约 58 MB/年。
     arc_cfg = w.get("archive", {}) or {}
-    if arc_cfg.get("summary", True):
-        with_f = bool(arc_cfg.get("summary_factors", True))
-        brief = []
-        for r in scored:
-            item = {"code": r["code"], "name": r["name"], "score": round(r["score"], 2)}
-            if with_f:
-                item["factors"] = {k: round(v, 2) for k, v in r["factors"].items()}
-                item["penalty"] = round(r["penalty"], 2)
-            brief.append(item)
-        s_fp = arc / f"{now.strftime('%Y%m%d_%H%M')}_summary.json"
-        _dump(s_fp, {
-            "kind": "score_summary",
-            "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
+    mode = str(arc_cfg.get("mode", "on_close")).lower()
+    want_archive = (mode == "always") or (mode == "on_close" and full_archive)
+    arc = DATA / "archive" / now.strftime("%Y/%m")
+
+    if not want_archive:
+        print(f"[score] 非收盘阶段：跳过归档（archive.mode={mode}），"
+              f"只刷新发布数据，避免仓库膨胀")
+    else:
+        _dump(arc / f"{now.strftime('%Y%m%d_%H%M')}.json", {
+            "updated": now.isoformat(timespec="seconds"),
             "intraday": intraday,
             "macro_score": m,
-            "count": len(brief),
-            "boards": brief,
+            "macro_detail": {"liquidity": round(liq, 3), "volume_price": round(vp, 3),
+                             "policy": round(pol, 3), "sentiment": round(sent, 3)},
+            "boards": scored,
+            # 真实数据显式标记，与 make_demo.py 的 demo=true 对应；
+            # backtest.load_snapshots 据此剔除合成快照
             "demo": False,
         })
-        print(f"[score] 分数矩阵 summary {len(brief)} 条（含因子={with_f}）"
-              f"-> {s_fp.name}")
+
+        # ---- 轻量「分数矩阵」快照（跨日 IC 评估用；开关见 weights.yaml 的 archive 段）
+        # 为什么非写不可：整份归档容易都挤在**同一天**，backtest 按日期去重后样本数
+        # 恒为 1，「样本不足」是结构性的（见 docs/backtest_report_hist.md §6.5.0）。
+        # 这份 summary 只有 code/name/score(+factors)，几十 KB，让跨日样本真正积累。
+        # 文件名带 _summary 后缀，backtest.load_snapshots 认得它，且**同一天以整份快照优先**。
+        # 必须同样带 demo 标记：与整份归档同款约定，否则合成数据会污染 IC。
+        if arc_cfg.get("summary", True):
+            with_f = bool(arc_cfg.get("summary_factors", True))
+            brief = []
+            for r in scored:
+                item = {"code": r["code"], "name": r["name"], "score": round(r["score"], 2)}
+                if with_f:
+                    item["factors"] = {k: round(v, 2) for k, v in r["factors"].items()}
+                    item["penalty"] = round(r["penalty"], 2)
+                brief.append(item)
+            s_fp = arc / f"{now.strftime('%Y%m%d_%H%M')}_summary.json"
+            _dump(s_fp, {
+                "kind": "score_summary",
+                "updated": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "intraday": intraday,
+                "macro_score": m,
+                "count": len(brief),
+                "boards": brief,
+                "demo": False,
+            })
+            print(f"[score] 分数矩阵 summary {len(brief)} 条（含因子={with_f}）"
+                  f"-> {s_fp.name}")
     print(f"[score] {len(scored)} boards | macro={m} ({S.macro_zone(m, ga, gn)}) "
-          f"| 流动性{liq:.2f} 量价{vp:.2f} 政策{pol:.2f} 情绪{sent:.2f} | intraday={intraday}")
+          f"| 流动性{liq:.2f} 量价{vp:.2f} 政策{pol:.2f} 情绪{sent:.2f} "
+          f"| intraday={intraday} | {now:%Y-%m-%d %H:%M} 北京时间")
 
 
 # ----------------------------------------------------------------- close
 def stage_close(w: dict, meta: dict, rebuild_map: bool = False) -> None:
-    """收盘复核：先补齐当日收盘 K 线，再用收盘价重算归档"""
+    """收盘复核：先补齐当日收盘 K 线，再用收盘价重算并归档
+
+    `full_archive=True` 是今天的**唯一一次**归档（权重见 weights.yaml 的
+    `archive.mode`）：盘中 30 分钟一跑都只刷新发布数据，不再写整份快照。
+    """
     stage_warmup(w, meta, rebuild_map=rebuild_map)
-    stage_score(w, meta)
+    stage_score(w, meta, full_archive=True)
 
 
 # ------------------------------------------------------------------ main

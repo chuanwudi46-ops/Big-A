@@ -11,7 +11,7 @@
    改 VERSION**（sw.js 字节随之变化，触发 SW 重装 + 清旧缓存）。
    当前 VERSION 对应：申万二级 120 板块 + 大盘关键位（日/周/月/年）+ 回撤/涨幅 + 事件日历。
 */
-const VERSION = 'wb-v3';
+const VERSION = 'wb-v4';
 const STATIC_ASSETS = [
   './',
   './index.html',

@@ -3,9 +3,21 @@
 设计原则
 1. 每个函数内部做重试（免费接口本质是爬虫，偶发失败是常态）
 2. 单点失败一律降级返回空表/空值，绝不中断整体评分流程
-3. **双通道**：优先 akshare（列名稳定），失败时回退到东方财富公开接口直连。
-   实测 akshare 部分接口硬编码分片域名（如 17.push2.eastmoney.com），
-   在部分网络环境下不可达，直连兜底可显著提升可用性。
+3. **每个用途各有自己的通道优先级**（2026-09-16 按实测校准，勿再写成「一律 akshare 优先」）：
+
+   | 用途 | 首选 | 兜底 |
+   |---|---|---|
+   | 板块日 K 线 | **腾讯** `newfqkline/get`（pt01+申万码） | 东财直连 → akshare |
+   | 板块快照 / 成分股 | **东财 `push2delay` 直连**（一次请求含主力净流入） | akshare |
+   | 高管持股变动 | **东财 `datacenter-web` + 服务端 filter** | akshare |
+   | 财经日历 | 东财 `RPT_CPH_FECALENDAR` | — |
+   | 限售解禁 / 新闻 / 两融 / 指数 | akshare | — |
+
+   为什么不能「一律 akshare 优先」：①东财 **K 线**在境外 runner 与本机都不可用
+   （静态封锁 + 软限流叠加），必须换腾讯；②akshare 部分接口硬编码分片域名
+   （如 17.push2.eastmoney.com），部分网络不可达；③akshare 的
+   `stock_hold_management_detail_em` 无日期过滤、翻全部 344 页要 8 分 49 秒，
+   直连 + 服务端 filter 只要 0.98 秒。
 """
 from __future__ import annotations
 
@@ -15,6 +27,8 @@ import datetime as dt
 
 import pandas as pd
 import requests
+
+import clock
 
 RETRY = 3
 SLEEP = 1.5
@@ -461,7 +475,7 @@ def _direct_share_change(days: int = SHARE_WINDOW_DAYS) -> pd.DataFrame:
     列名对齐 akshare 的 stock_hold_management_detail_em（中文列名），
     这样 chips.reduction_counts 的候选列匹配逻辑无需改动。
     """
-    since = (dt.date.today() - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    since = (clock.today() - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     raw = _datacenter_page("RPT_EXECUTIVE_HOLD_DETAILS", "CHANGE_DATE", since,
                            "CHANGE_DATE,SECURITY_CODE,PERSON_NAME")
     df = raw.rename(columns={
@@ -743,7 +757,7 @@ def index_daily(symbol: str = "sh000300") -> pd.DataFrame:
 def margin_balance() -> pd.DataFrame:
     """两融余额（宏观流动性代理）"""
     try:
-        end = dt.date.today().strftime("%Y%m%d")
+        end = clock.today().strftime("%Y%m%d")
         return _retry(_ak().stock_margin_sse, start_date="20240101", end_date=end)
     except Exception as e:  # noqa: BLE001
         print(f"[warn] margin balance: {e}")

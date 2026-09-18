@@ -20,6 +20,7 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+import clock
 import sources
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -80,7 +81,7 @@ def trade_calendar(refresh: bool = False) -> set[str]:
     if dates:
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            fp.write_text(json.dumps({"updated": dt.date.today().isoformat(),
+            fp.write_text(json.dumps({"updated": clock.today().isoformat(),
                                       "dates": dates}, ensure_ascii=False),
                           encoding="utf-8")
         except Exception:  # noqa: BLE001
@@ -91,7 +92,7 @@ def trade_calendar(refresh: bool = False) -> set[str]:
 
 def is_trading_day(d: dt.date | None = None) -> bool:
     """精确交易日判断；日历不可用时回退周一至周五"""
-    d = d or dt.date.today()
+    d = d or clock.today()
     key = d.strftime("%Y-%m-%d")
     cal = trade_calendar()
     if cal:
@@ -101,7 +102,7 @@ def is_trading_day(d: dt.date | None = None) -> bool:
 
 def last_trading_day(d: dt.date | None = None) -> dt.date:
     """最近一个交易日（含当天）"""
-    d = d or dt.date.today()
+    d = d or clock.today()
     cal = trade_calendar()
     if not cal:
         while d.weekday() >= 5:

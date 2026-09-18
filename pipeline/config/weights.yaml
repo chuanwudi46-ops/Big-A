@@ -61,14 +61,20 @@ macro:                      # 宏观分（股市上涨四要素）
   gate_neutral: 40          # 40 <= M < 70 -> 中性；M < 40 -> 防守
 
 intraday:
-  mark: true                # 14:00 盘中快照在产物中标注 intraday: true
+  mark: true                # 盘中（北京时间 09:15–15:00）的产物标注 intraday: true
 
 archive:
-  # 每次 score 除整份归档外，额外写一份轻量「分数矩阵」快照（几 KB）。
-  # 为什么需要：整份归档体积大、每天写多份却都挤在同一天，
-  # backtest.load_snapshots 按日期去重后样本数恒为 1 →「样本不足」是结构性的，
-  # 不是「攒几周就好」。这份 summary 让跨日样本真正积累起来，
-  # 从而可以评估**线上真实发布分**（12 维全套）的 IC。
+  # ---- 归档时机 ----
+  #   on_close（默认）：只有 close 阶段写归档，盘中 score 只刷新发布数据
+  #   always          ：每次 score 都写。⚠️ 整份快照约 200 KB/次，盘中每 30 分钟一跑
+  #                     就是约 640 MB/年（on_close 约 58 MB/年），别开。
+  # 之所以 on_close 够用：backtest.load_snapshots 按**日期**去重且「整份」优先于
+  # summary，盘中那几份对 IC 零增量 —— 攒样本要的是**天数**，不是文件数。
+  mode: on_close
+  # 除整份归档外，额外写一份轻量「分数矩阵」快照（几十 KB）。
+  # 为什么需要：整份归档体积大、容易都挤在同一天，backtest.load_snapshots 按日期
+  # 去重后样本数恒为 1 →「样本不足」是结构性的，不是「攒几周就好」。
+  # 这份 summary 让跨日样本真正积累，从而可以评估**线上真实发布分**（12 维全套）的 IC。
   summary: true
   # summary 里是否带 11 维因子值：
   #   true  ≈ 30 KB/日（约 7 MB/年）→ 可以逐因子算 IC，

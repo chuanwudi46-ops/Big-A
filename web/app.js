@@ -96,6 +96,33 @@ function ls(key, fallback) {
 }
 function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
+/* ================= 数据新鲜度（时间语义一律是北京时间） =================
+   产物里的 `updated` 由 pipeline/clock.py 写成**北京时间**。
+   为什么不能直接 `new Date(s)`：JS 按手机本地时区解析，人在国外时「3 分钟前」
+   会被算成 8 小时前 —— 而本项目的时间语义永远是北京时间。故显式按 UTC+8 解析。
+   ====================================================================== */
+
+function parseCN(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], +m[6]) : NaN;
+}
+
+function agoText(s) {
+  const t = parseCN(s);
+  if (!Number.isFinite(t)) return '';
+  const min = Math.floor((Date.now() - t) / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h} 小时前` : `${Math.floor(h / 24)} 天前`;
+}
+
+/** 超过约 26 小时没更新就标黄提示（周末与节假日属正常，只是提醒「这份不是今天的」） */
+function isStale(s) {
+  const t = parseCN(s);
+  return Number.isFinite(t) && (Date.now() - t) > 26 * 3600 * 1000;
+}
+
 /* ================== 实时补丁：拉全部行业板块快照 ==================
    两个必须遵守的接口事实（踩过坑，勿改）：
    1) clist 单页 pz 被服务端硬截断到 100 —— 必须按 total 翻页，否则 496 个
@@ -278,8 +305,13 @@ function renderMacroBar(meta) {
   const zone = meta?.macro_zone ?? '-';
   const cls = zone === '进攻' ? 'up' : (zone === '防守' ? 'down' : 'flat');
   const demo = meta?.demo ? '<em class="demo">演示数据</em>' : '';
+  // updated 是北京时间（pipeline/clock.py 保证）。原先直接打印，而 CI runner 是 UTC，
+  // 于是收盘 15:43 的数据在手机上显示成「早上 07:43」——看着像一整天没更新。
+  // 这里再补一个相对时间，并在超过约一天时标黄。
+  const stale = isStale(meta?.updated) ? ' stale' : '';
   return `宏观 <b>${m ?? '-'}</b><em class="${cls}">${zone}</em>${demo}
-    <span class="ts">${meta?.updated || ''}${meta?.intraday ? ' · 盘中快照' : ''}</span>`;
+    <span class="ts${stale}">${meta?.updated || ''}<span class="ago" id="agoTs">${
+    agoText(meta?.updated)}</span>${meta?.intraday ? ' · 盘中快照' : ''}</span>`;
 }
 
 /* 演示数据警示
@@ -295,6 +327,31 @@ function demoBanner(meta) {
   const header = document.querySelector('header');
   if (header) header.insertBefore(el, header.firstChild);
   else document.body.insertBefore(el, document.body.firstChild);
+}
+
+/* 数据更新提示条
+   盘中每 30 分钟会出一版新产物。这里每 5 分钟静默探一次 meta.json，
+   发现 updated 变了只**提示**、不强制刷新 —— 用户可能正在看某个板块，
+   直接 reload 会打断。回前台时也补查一次：手机上切回来最容易看到旧内容。 */
+function startFreshWatch(meta) {
+  const seen = meta?.updated || '';
+  const check = async () => {
+    if (document.getElementById('freshBar')) return;
+    try {
+      const m = await fetchJSON(`${DATA}meta.json`);
+      if (!m?.updated || m.updated === seen) return;
+      const el = document.createElement('div');
+      el.id = 'freshBar';
+      el.className = 'fresh-bar';
+      el.innerHTML = `数据已更新到 <b>${String(m.updated).slice(11, 16)}</b>`
+        + '（北京时间） · 点此刷新';
+      el.addEventListener('click', () => location.reload());
+      const header = document.querySelector('header');
+      (header || document.body).insertBefore(el, (header || document.body).firstChild);
+    } catch { /* 离线或产物缺失：静默，不打扰 */ }
+  };
+  setInterval(check, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
 }
 
 function renderChips(boards, current) {
@@ -749,6 +806,13 @@ async function boot() {
   paintTabBadge();
 
   demoBanner(meta);   // 合成演示数据必须显著标注，避免误当真数据
+  startFreshWatch(meta);   // 盘中每 30 分钟一版新产物：发现新版只提示，不打断
+
+  // 相对时间每 30 秒自更新，否则「3 分钟前」会永远停在打开页面的那一刻
+  setInterval(() => {
+    const el = document.getElementById('agoTs');
+    if (el) el.textContent = agoText(state.meta?.updated);
+  }, 30000);
 
   // 自选要按当前板块宇宙过滤：切换层级（如一级 31 → 二级 127）后，
   // localStorage 里存的是旧代码，不过滤会出现「选中了但列表里找不到」

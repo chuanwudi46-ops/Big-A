@@ -2,10 +2,24 @@ name: daily-score
 
 on:
   schedule:
-    # GitHub Actions cron 使用 UTC 时间；北京时间 = UTC + 8
-    - cron: "40 5 * * 1-5"    # 13:40 BJT 预热：抓历史K线 / 解禁 / 新闻
-    - cron: "0 6 * * 1-5"     # 14:00 BJT 主评分：盘中快照 -> 12维 -> 发布
-    - cron: "30 7 * * 1-5"    # 15:30 BJT 收盘复核：重算并归档
+    # GitHub Actions 的 cron 用的是 **UTC**，北京时间 = UTC + 8。
+    # 分钟一律取 :05 / :35 —— GitHub 的定时任务在整点前后最拥堵、延迟最大，
+    # 错开能明显降低「到点没跑、晚了十几分钟」的概率。
+    #
+    # 09:10 预热一次即可：K 线走 Actions Cache 跨运行复用，盘中各次 score
+    # 直接吃缓存，不必每次重抓（重抓 120 板块会撞对端限流）。
+    - cron: "10 1 * * 1-5"    # 09:10 BJT 盘前预热
+    - cron: "35 1 * * 1-5"    # 09:35 开盘后首次评分
+    - cron: "5 2 * * 1-5"     # 10:05
+    - cron: "35 2 * * 1-5"    # 10:35
+    - cron: "5 3 * * 1-5"     # 11:05
+    - cron: "30 3 * * 1-5"    # 11:30 上午收盘
+    - cron: "5 5 * * 1-5"     # 13:05 下午开盘
+    - cron: "35 5 * * 1-5"    # 13:35
+    - cron: "5 6 * * 1-5"     # 14:05
+    - cron: "35 6 * * 1-5"    # 14:35
+    - cron: "5 7 * * 1-5"     # 15:05 收盘价已定
+    - cron: "35 7 * * 1-5"    # 15:35 收盘复核 + 当天唯一一份归档
   workflow_dispatch:
     inputs:
       stage:
@@ -54,15 +68,17 @@ jobs:
 
       - name: Resolve stage
         id: s
+        # 用 case 而不是 if/elif：cron 会随需求增删，**默认落到 score**，
+        # 只有「盘前预热」和「收盘归档」两条需要显式列出。
         run: |
           if [ -n "${{ inputs.stage }}" ]; then
             st="${{ inputs.stage }}"
-          elif [ "${{ github.event.schedule }}" = "40 5 * * 1-5" ]; then
-            st=warmup
-          elif [ "${{ github.event.schedule }}" = "30 7 * * 1-5" ]; then
-            st=close
           else
-            st=score
+            case "${{ github.event.schedule }}" in
+              "10 1 * * 1-5") st=warmup ;;
+              "35 7 * * 1-5") st=close  ;;
+              *)              st=score  ;;
+            esac
           fi
           echo "stage=$st" >> "$GITHUB_OUTPUT"
           echo "resolved stage: $st"
@@ -82,7 +98,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "no data change"
           else
-            git commit -m "data: ${{ steps.s.outputs.stage }} $(date -u +%FT%TZ)"
+            # 提交信息用**北京时间**（runner 默认 UTC，看 log 容易把 15:43 的收盘
+            # 提交误读成早上 07:43 —— 和产物时间戳是同一个坑）
+            git commit -m "data: ${{ steps.s.outputs.stage }} $(TZ=Asia/Shanghai date +%FT%T)"
             git push
           fi
 

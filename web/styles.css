@@ -67,6 +67,30 @@ header {
   font-size: 11px;
 }
 
+/* 相对时间（「3 分钟前」）：手机上一眼看出数据到底新不新 */
+.macro .ts .ago { color: #7d8590; margin-left: 5px; }
+.macro .ts .ago:empty { display: none; }
+/* 超过约 26 小时没更新：标黄，避免把旧产物当成盘中数据 */
+.macro .ts.stale,
+.macro .ts.stale .ago { color: #d97706; }
+
+/* 数据已更新的提示条：点了才刷新，不打断正在看的内容 */
+.fresh-bar {
+  background: #0f2a1d;
+  color: #86efac;
+  border: 1px solid #14532d;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 6px 9px;
+  margin: -4px -5px 8px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.fresh-bar b { color: #bbf7d0; }
+
 .chips {
   display: flex; gap: 8px;
   overflow-x: auto;

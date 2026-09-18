@@ -216,5 +216,39 @@ if (!fs.existsSync(idxFp)) {
   }
 }
 
+/* ---------- 5. 宏观条与数据新鲜度（时区回归） ----------
+   这一段是补的：`renderMacroBar` 原先**没有任何断言**，于是
+   「CI runner 是 UTC，把北京时间 15:43 写成 07:43，前端原样打印，
+     手机上看起来像一整天没更新」这个 bug 一路静默上了线。
+
+   断言方式刻意不硬编码「小时不能在 1–7 之间」（本地半夜跑流水线会误报），
+   而是拿产物时间去比**当前北京时间**：若又变回 UTC，时间戳会落进未来约 8 小时，
+   `ageH < 0` 会立刻变红 —— 自校准，且不受节假日长短影响。 */
+const metaFp = path.join(DATA, 'meta.json');
+if (!fs.existsSync(metaFp)) {
+  console.log('! 缺少 web/data/meta.json，跳过（先跑一次 pipeline）');
+} else {
+  const meta = JSON.parse(fs.readFileSync(metaFp, 'utf8'));
+  ctx.__meta = meta;
+
+  ok(vm.runInContext('parseCN("2026-09-18 15:43:57")', ctx)
+    === Date.UTC(2026, 8, 18, 7, 43, 57), 'parseCN 显式按 UTC+8 解析（不随手机时区漂移）');
+  ok(vm.runInContext('Number.isNaN(parseCN(""))', ctx) === true, 'parseCN 对空串返回 NaN');
+
+  const html = vm.runInContext('renderMacroBar(__meta)', ctx);
+  ok(html.includes(String(meta.macro_score)), '宏观条渲染出宏观分', String(meta.macro_score));
+  ok(html.includes(String(meta.macro_zone)), '宏观条渲染出区间', String(meta.macro_zone));
+  ok(html.includes(meta.updated), '宏观条渲染出更新时间', meta.updated);
+  ok(/class="ago" id="agoTs"/.test(html), '宏观条渲染出相对时间槽位');
+  const ago = vm.runInContext('agoText(__meta.updated)', ctx);
+  ok(typeof ago === 'string' && ago.length > 0, '相对时间文案可计算', ago);
+  ok(html.includes(String(meta.updated).slice(0, 10)), '宏观条含产物日期');
+
+  const ageH = (Date.now() - vm.runInContext('parseCN(__meta.updated)', ctx)) / 3600000;
+  ok(ageH > -2, '产物时间是北京时间而非 UTC（写成 UTC 会落进未来约 8 小时）',
+    `${ageH.toFixed(1)} 小时前`);
+  ok(ageH < 24 * 30, '产物时间不是明显损坏/错年份的', `${(ageH / 24).toFixed(1)} 天前`);
+}
+
 console.log(failed ? `\n✗ ${failed} 项未通过` : '\n✓ 全部通过');
 process.exit(failed ? 1 : 0);

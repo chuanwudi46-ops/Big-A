@@ -34,6 +34,8 @@ import pathlib
 
 import pandas as pd
 
+import clock
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = pathlib.Path(__file__).resolve().parent / "config" / "events_rules.json"
 DATA = ROOT / "web" / "data"
@@ -272,7 +274,7 @@ def load_calendar(cache: pathlib.Path | None = None) -> pd.DataFrame:
         except Exception as e:  # noqa: BLE001
             print(f"[warn] events_raw.parquet 读取失败：{e}")
     import sources  # 同目录模块
-    today = dt.date.today()
+    today = clock.today()
     return sources.econ_calendar(
         (today - dt.timedelta(days=10)).strftime("%Y-%m-%d"),
         (today + dt.timedelta(days=180)).strftime("%Y-%m-%d"))
@@ -303,7 +305,7 @@ def build(raw: pd.DataFrame, cfg: dict, today: dt.date,
             e["level_label"] = (cfg.get("levels") or {}).get(str(e["level"]), "")
 
     return {
-        "updated": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated": clock.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": today_s,
         "lookback_days": int((cfg.get("window") or {}).get("lookback_days", 7)),
         "horizon_days": int((cfg.get("window") or {}).get("horizon_days", 120)),
@@ -331,7 +333,7 @@ if __name__ == "__main__":
     import sources  # noqa: E402
 
     _cfg = load_rules()
-    _today = dt.date.today()
+    _today = clock.today()
     _raw = sources.econ_calendar((_today - dt.timedelta(days=10)).strftime("%Y-%m-%d"),
                                  (_today + dt.timedelta(days=180)).strftime("%Y-%m-%d"))
     _rel = pd.DataFrame()

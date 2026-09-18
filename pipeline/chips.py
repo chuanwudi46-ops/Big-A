@@ -18,6 +18,7 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+import clock
 import sources
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -137,7 +138,7 @@ def release_pressure(release_df: pd.DataFrame, bmap: pd.DataFrame,
             or bmap is None or bmap.empty):
         return out
 
-    as_of = as_of or dt.date.today()
+    as_of = as_of or clock.today()
     end = as_of + dt.timedelta(days=horizon_days)
 
     df = release_df.copy()
@@ -204,7 +205,7 @@ def reduction_counts(share_df: pd.DataFrame, bmap: pd.DataFrame,
     if share_df is None or share_df.empty or bmap is None or bmap.empty:
         return out
 
-    as_of = as_of or dt.date.today()
+    as_of = as_of or clock.today()
     df = share_df.copy()
 
     code_col = _pick(df, CODE_CANDS)
