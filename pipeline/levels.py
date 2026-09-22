@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""大盘关键位：按周线 / 月线 / 年线给出压力位与支撑位。
+"""大盘关键位：均线体系（动态）+ 摆动高低点（静态）两套支撑压力。
 
 思路
 --------------------------------------------------------------------------
-支撑压力位的本质是「历史上价格在此处被反复拒绝或承接」。最朴素也最稳的
-做法是找**摆动高低点（swing high / low）**：一根 K 线的高点比左右各 k 根
-都高，它就是一个结构高点，构成上方压力；低点反之。
+支撑压力位有两类来源，性质完全不同，**必须都给，不能只给一套**：
+
+1) **均线体系（动态、会走）** —— 5 / 10 / 20 / 30 / 60 日线与年线。
+   它代表**市场的持仓成本**：某条均线就是最近 N 天买入者的平均成本。
+   惯例判定：现价在均线**上方** → 该均线是回踩支撑（成本在这里、有人护）；
+   在**下方** → 是反弹压力（套牢盘在这里、有人解套）。所以同一条均线
+   是支撑还是压力，**取决于现价相对它的位置**，不能写死。
+   另配斜率（走平 / 上翘 / 下弯）与多空排列 —— 走平的均线支撑力最强，
+   下弯的均线最容易一碰就破。
+
+2) **摆动高低点（静态、不走）** —— 前高 / 前低。
+   它代表**价格记忆**：历史上价格在此处被反复拒绝或承接。
 
 为什么要分周期：同一个点位在不同级别上的意义完全不同。
 **日线**前高是当天/当周就要面对的一线位置，周线前高是短线压力，
@@ -19,7 +28,7 @@
      的那一档，并把命中次数记为 `touches`（被反复测试 3 次的位置显然比
      只碰过一次的更硬）。周线/月线/年线保持 merge_pct=0，输出与历史完全一致。
 
-产物：web/data/levels.json，供前端渲染「大盘位置」卡片。
+产物：web/data/levels.json，供前端渲染「大盘位置」视图。
 """
 from __future__ import annotations
 
@@ -49,6 +58,20 @@ INDICES = [
     ("sh000001", "上证指数"),
     ("sh000300", "沪深300"),
 ]
+
+# 均线体系：(窗口, 标签)。用户明确要的六条：5 / 10 / 20 / 30 / 60 日线 + 年线。
+# 年线取 **250 日**（A 股惯例；也有用 240 的，但东财/同花顺默认 250，跟它对齐才不会
+# 出现「软件上站上年线、我们这儿还差一点」这种对不上的尴尬）。
+# ⚠️ 标签里不要写「日线」以外的口径（如「季线」）—— 60 日线的俗称是「季线」，
+# 但用户是按日数提的，写成日数最不容易歧义。
+MA_WINDOWS = [
+    (5, "5日线"), (10, "10日线"), (20, "20日线"),
+    (30, "30日线"), (60, "60日线"), (250, "年线"),
+]
+
+# 判定「均线密集」的阈值（5/10/20/30/60 五条线的极差 ÷ 中位价）。
+# 密集意味着方向未选、随时可能变盘，是均线体系里信息量最大的一种形态。
+MA_DENSE_PCT = 2.0
 
 
 # --------------------------------------------------------------------- 工具
@@ -269,6 +292,110 @@ def _high_phrase(p: dict) -> str:
     return f"创近 {max(1, round(bars / BARS_PER_YEAR.get(p['key'], 1)))} 年新高"
 
 
+def ma_levels(df: pd.DataFrame, close: float) -> dict:
+    """均线体系：动态支撑压力。
+
+    现价在均线**上方** → 该均线是**支撑**（那里是最近 N 天买入者的平均成本，
+    回踩到成本区通常有承接）；在**下方** → 是**压力**（反弹到成本区会遇到解套抛压）。
+    所以 role 由现价与均线的相对位置决定，**不能写死**。
+
+    `slope_pct` 是这条均线近 5 根的变化率，决定这条线的含金量：
+    走平的最硬（成本高度集中），下弯的最容易一碰就破。
+
+    ⚠️ 必须拿**完整日线**来算，不能复用某个周期的回看片段：MA60 / 年线在
+    120 根的日线片段上算不出来，会**静默少两条线**（页面看着正常，实际缺档）。
+    """
+    if df is None or df.empty:
+        return {}
+    c = pd.to_numeric(df["close"], errors="coerce").astype(float)
+    lines: list[dict] = []
+    for win, label in MA_WINDOWS:
+        if len(c) < win:
+            continue
+        s = c.rolling(win).mean()
+        cur = s.iloc[-1]
+        if not pd.notna(cur) or float(cur) <= 0:
+            continue
+        cur = float(cur)
+        prev = s.iloc[-6] if len(s) >= 6 and pd.notna(s.iloc[-6]) else None
+        slope = None if prev is None or float(prev) <= 0 else (cur / float(prev) - 1) * 100
+        gap = (close / cur - 1) * 100
+        lines.append({
+            "key": f"ma{win}", "label": label, "window": win,
+            "price": round(cur, 2),
+            "gap_pct": round(gap, 2),
+            "above": close >= cur,                       # 现价是否在该均线上方
+            "role": "support" if close >= cur else "resistance",
+            "slope_pct": None if slope is None else round(slope, 3),
+        })
+    if not lines:
+        return {}
+
+    # 多空排列只看短中期五条：年线太慢，混进来会让「排列」几乎永远判不出来
+    seq = [l for l in lines if l["window"] != 250]
+    arrangement = None
+    if len(seq) == 5:
+        px = [l["price"] for l in seq]
+        if all(px[i] > px[i + 1] for i in range(4)):
+            arrangement = "多头排列"
+        elif all(px[i] < px[i + 1] for i in range(4)):
+            arrangement = "空头排列"
+        else:
+            arrangement = "交织"
+    lo = min(l["price"] for l in seq) if seq else None
+    hi = max(l["price"] for l in seq) if seq else None
+    mid = ((lo + hi) / 2) if seq else 0.0
+    dense = bool(seq and mid > 0 and (hi - lo) / mid * 100 <= MA_DENSE_PCT)
+
+    sup = [l for l in lines if l["role"] == "support"]
+    res = [l for l in lines if l["role"] == "resistance"]
+    # 「最近」= 离现价最近：支撑取下方最高的一条，压力取上方最低的一条
+    near_sup = max(sup, key=lambda l: l["price"]) if sup else None
+    near_res = min(res, key=lambda l: l["price"]) if res else None
+
+    # 年线的得而复失 / 失而复得是最有意义的状态切换：只报「变化」，
+    # 否则「站上年线」会连续几十天重复出现在提示里，把版面占满
+    year_cross = None
+    if len(c) >= 251:
+        s_y = c.rolling(250).mean()
+        if pd.notna(s_y.iloc[-2]):
+            was = float(c.iloc[-2]) >= float(s_y.iloc[-2])
+            now = close >= float(s_y.iloc[-1])
+            if was and not now:
+                year_cross = "失守年线"
+            elif not was and now:
+                year_cross = "收复年线"
+
+    def _ph(item: dict | None, word: str, empty: str) -> str:
+        if item is None:
+            return empty
+        return f"{item['label']} {item['price']}（{item['gap_pct']:+.2f}%）"
+
+    bits = []
+    if near_sup:
+        bits.append("下方最近均线支撑 " + _ph(near_sup, "", ""))
+    if near_res:
+        bits.append("上方最近均线压力 " + _ph(near_res, "", ""))
+    if arrangement:
+        bits.append(arrangement)
+    if dense:
+        bits.append(f"5/10/20/30/60 日线密集（极差 {(hi - lo) / mid * 100:.2f}%，方向待选）")
+    if year_cross:
+        bits.append(year_cross)
+
+    return {
+        "lines": lines,
+        "arrangement": arrangement,
+        "dense": dense,
+        "above_count": sum(1 for l in lines if l["above"]),
+        "below_count": sum(1 for l in lines if not l["above"]),
+        "nearest_support": near_sup,
+        "nearest_resistance": near_res,
+        "year_cross": year_cross,
+        "text": "；".join(bits),
+    }
+
+
 def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
     """对单个指数出一份多周期关键位报告"""
     df = normalize(daily)
@@ -276,6 +403,9 @@ def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
         raise ValueError(f"{name} 无可用日线")
     close = float(df["close"].iloc[-1])
     prev = float(df["close"].iloc[-2]) if len(df) > 1 else close
+
+    # 均线用**完整日线**算（MA60 / 年线在 120 根片段上算不出来）
+    ma = ma_levels(df, close)
 
     periods = []
     for kind, label, lookback, k, merge_pct, top in PERIODS:
@@ -338,6 +468,25 @@ def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
     if nres and nres["near"]:
         notes.append(f"上方 {nres['price']} 为{nres['period']}关键前高"
                      f"（形成于 {nres['date']}），能否放量突破决定方向")
+
+    # ---- 均线形态提示：与摆动档位的提示**合并成一列 notes**，
+    # 前端沿用既有结构即可显示，不用为均线再开一块渲染逻辑
+    if ma:
+        if ma.get("year_cross"):
+            notes.append(f"**{ma['year_cross']}**（年线 {ma['lines'][-1]['price']}）")
+        if ma.get("dense"):
+            notes.append(f"5/10/20/30/60 日线高度密集，方向选择临近"
+                         f"（当前{ma['arrangement']}）")
+        n_line = len(ma["lines"])
+        if ma["above_count"] == n_line:
+            notes.append(f"站上全部 {n_line} 条均线（5/10/20/30/60 日线 + 年线）")
+        elif ma["below_count"] == n_line:
+            notes.append(f"跌破全部 {n_line} 条均线，均线全数转为上方压力")
+        elif ma.get("arrangement") == "多头排列":
+            notes.append("5/10/20/30/60 日线多头排列 —— 回踩均线不破视为趋势延续")
+        elif ma.get("arrangement") == "空头排列":
+            notes.append("5/10/20/30/60 日线空头排列 —— 反弹到均线附近先按压力看")
+    summary["ma_text"] = ma.get("text", "")
     summary["notes"] = notes
 
     return {
@@ -345,6 +494,7 @@ def analyze(name: str, code: str, daily: pd.DataFrame) -> dict:
         "date": df["date"].iloc[-1].strftime("%Y-%m-%d"),
         "close": round(close, 2),
         "pct": round((close / prev - 1) * 100, 2) if prev else None,
+        "ma": ma,
         "periods": periods,
         "summary": summary,
     }

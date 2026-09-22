@@ -18,6 +18,8 @@
   <div class="macro" id="macro">加载中…</div>
   <div class="tabs" id="tabs">
     <button data-view="score" class="on">板块评分</button>
+    <button data-view="market">大盘</button>
+    <button data-view="flow">主力资金</button>
     <button data-view="swing">回撤 / 涨幅</button>
     <button data-view="events">事件日历</button>
   </div>
@@ -25,9 +27,11 @@
 </header>
 
 <main id="main">
-  <!-- 大盘关键位卡片独立成块：它由 levels.json 驱动，与视图切换无关，
-       放在 #body 之外可避免被评分视图的整块重绘冲掉 -->
-  <div id="lvCard"></div>
+  <!-- 大盘关键位卡片独立成块：它由 levels.json 驱动，放在 #body 之外可避免被其它
+       视图的整块重绘冲掉。2026-09-22 起改为「大盘」tab 的内容（与板块评分、
+       事件日历并列），所以由 renderCurrent 控制显隐 —— 想让它常驻只需把
+       `$('#lvCard').hidden = ...` 那行改成 false。 -->
+  <div id="lvCard" hidden></div>
   <div id="body">
     <div class="skel">正在加载评分…</div>
   </div>

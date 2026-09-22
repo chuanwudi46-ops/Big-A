@@ -135,8 +135,14 @@ function isStale(s) {
       我们只做本地索引、不关心顺序，故换稳定排序键零副作用。
    ================================================================= */
 const LIVE_HOSTS = ['push2.eastmoney.com', 'push2delay.eastmoney.com'];
-const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f104,f105';
+// f184 主力净占比、f66/f72/f78/f84 超大单/大单/中单/小单净额 —— 「主力资金」视图
+// 的板块排行要用。实测这几个字段和 f62 同在一个 clist 响应里，多要不花钱。
+const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f66,f72,f78,f84,f104,f105,f184';
 const LIVE_PAGE = 100;               // 服务端硬上限，改大无效
+// 缓存键版本位：**改了 LIVE_FIELDS 就必须升**（snap2 -> snap3），
+// 否则用户端 IndexedDB 里还是那份缺新字段的旧快照，「修了等于没修」。
+// 见 china-finance-data-from-overseas-runner 手册「步骤 7 ④」。
+const LIVE_CACHE_KEY = 'snap3';
 
 function liveURL(host, pn) {
   return `https://${host}/api/qt/clist/get`
@@ -165,7 +171,7 @@ async function liveAll(host) {
 }
 
 async function liveSnapshot() {
-  const cached = await Store.get('snap2');
+  const cached = await Store.get(LIVE_CACHE_KEY);
   if (cached && Date.now() - cached.ts < SNAP_TTL) return cached.rows;
 
   for (const host of LIVE_HOSTS) {
@@ -181,10 +187,12 @@ async function liveSnapshot() {
           turnover: r.f8,
           up: r.f104,
           down: r.f105,
-          mainInflow: r.f62,
+          mainInflow: r.f62,        // 主力净流入（元）
+          mainPct: r.f184,          // 主力净占比（%）
+          xlarge: r.f66, large: r.f72, medium: r.f78, small: r.f84,
         }));
       if (!rows.length) continue;
-      await Store.set('snap2', { ts: Date.now(), rows, host });
+      await Store.set(LIVE_CACHE_KEY, { ts: Date.now(), rows, host });
       return rows;
     } catch { /* 换下一个域名 */ }
   }
@@ -424,6 +432,33 @@ function levelCell(x, kind) {
     + `<i>${fmtPct(x.gap_pct)}</i></span>`;
 }
 
+/* 均线体系（5/10/20/30/60 日线 + 年线）—— 动态支撑压力。
+   现价在均线**上方** → 该均线是支撑；在**下方** → 是压力。所以同一张表里
+   既有支撑也有压力，不能按「压力位一列 / 支撑位一列」摆（那栏位会空一半）。 */
+function maRows(ma) {
+  if (!ma || !ma.lines || !ma.lines.length) return '';
+  const rows = ma.lines.map((l) => {
+    const sup = l.role === 'support';
+    const s = l.slope_pct;
+    const arrow = s == null ? '' : (s > 0.05 ? '↗' : (s < -0.05 ? '↘' : '→'));
+    const scls = s == null ? '' : (s > 0.05 ? 'up' : (s < -0.05 ? 'dn' : ''));
+    return `<div class="ma-row ${sup ? 'sup' : 'res'}">
+      <b>${l.label}<u class="maslope ${scls}">${arrow}</u></b>
+      <span class="ma-price">${l.price.toFixed(2)}</span>
+      <span class="ma-gap">${fmtPct(l.gap_pct)}</span>
+      <em class="ma-role">${sup ? '支撑' : '压力'}</em>
+    </div>`;
+  }).join('');
+  const arr = ma.arrangement
+    ? `<em class="ma-arr ${ma.arrangement === '多头排列' ? 'up'
+        : (ma.arrangement === '空头排列' ? 'dn' : '')}">${ma.arrangement}</em>` : '';
+  return `<div class="ma-wrap">
+    <div class="ma-th"><b>均线${arr}</b><span>点位</span><span>距离</span><em>性质</em></div>
+    ${rows}
+    ${ma.text ? `<p class="ma-sum">${ma.text}</p>` : ''}
+  </div>`;
+}
+
 function renderLevels(lv, sel = 0) {
   if (!lv || !lv.indices || !lv.indices.length) return '';
   const i = Math.min(Math.max(sel, 0), lv.indices.length - 1);
@@ -455,6 +490,8 @@ function renderLevels(lv, sel = 0) {
     <p class="lv-quote"><b>${I.name}</b><span class="lv-close">${I.close}</span>
       <em class="${(I.pct ?? 0) >= 0 ? 'up' : 'dn'}">${fmtPct(I.pct)}</em>
       <span class="lv-date">${I.date}</span></p>
+    ${maRows(I.ma)}
+    <p class="lv-cap">摆动前高 / 前低（静态价格记忆，不会随行情移动）</p>
     <div class="lv-grid">
       <div class="lv-row lv-th"><b></b><span>压力位</span><span>支撑位</span></div>
       ${rows}
@@ -463,10 +500,170 @@ function renderLevels(lv, sel = 0) {
     ${I.summary?.text ? `<p class="lv-sum">${I.summary.text}</p>` : ''}
     ${notes ? `<ul class="lv-notes">${notes}</ul>` : ''}
     <details class="lv-more"><summary>全部档位</summary>${all}</details>
-    <p class="src">日线取 120 个交易日内 k=5 的摆动高低点，并把 0.8% 内的同价位合并成
+    <p class="src">均线取 5 / 10 / 20 / 30 / 60 日线与年线（250 日）：现价在均线上方即为
+      支撑、下方即为压力，↗↘ 是这条均线近 5 日斜率（走平的支撑/压力最硬）。
+      摆动档位则取日线 120 个交易日内 k=5 的摆动高低点，并把 0.8% 内的同价位合并成
       「位置区」（×N 表示被测试 N 次，次数越多越硬）；周线 / 月线 / 年线取各自周期的
       摆动高低点。压力位只列现价上方、支撑位只列现价下方 —— 已被突破的位置没有参考价值。</p>
   </section>`;
+}
+
+/* ================== 主力资金（大盘沪深两市 + 板块排行） ==================
+   数据来自 flow.json：
+   - market   沪 / 深 / 合计的当日累计主力净流入与五档拆解（亿元）
+   - curve    分时累计曲线（**自开盘累计**，不是每分钟增量）
+   - history  近 N 个交易日趋势 —— 本系统**自己逐日攒的**（见 pipeline/flow.py）
+   - boards   板块主力净流入排行（后端值）
+
+   盘中还有一路更快的来源：liveSnapshot() 直接抓东财 clist 的 f62/f184，
+   那是**此刻**的板块值，用它覆盖后端榜单并把来源标成「实时」。
+
+   ⚠️ 大盘合计**没法**做前端实时：fflow 接口不吃 `cb=` 回调参数（实测加了 cb 直接 502），
+   浏览器跨域也拿不到 —— 它只能靠后端每 30 分钟一版。所以这一块必须显示
+   时间戳 + 相对时间，让人一眼看出它有多旧（数据是几点几分的就是几点几分的，不装新）。
+   ========================================================================= */
+
+function fmtYi(v, digits = 1) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return (v > 0 ? '+' : '') + v.toFixed(digits) + ' 亿';
+}
+
+/** 极简折线：只画趋势，不画坐标轴（手机上没人读轴）。
+ *  0 轴一定画进来 —— 否则「全红」或「全绿」的一段会被归一化成看着很剧烈的曲线。 */
+function spark(vals, w = 300, h = 56) {
+  const v = (vals || []).map((x) => (Number.isFinite(x) ? x : null));
+  const idx = v.map((x, i) => [i, x]).filter(([, x]) => x != null);
+  if (idx.length < 2) return '';
+  let lo = Math.min(...idx.map(([, x]) => x), 0);
+  let hi = Math.max(...idx.map(([, x]) => x), 0);
+  if (hi === lo) hi = lo + 1;
+  const pad = 6;
+  const px = (i) => pad + i * (w - 2 * pad) / (v.length - 1);
+  const py = (y) => pad + (hi - y) / (hi - lo) * (h - 2 * pad);
+  const pts = idx.map(([i, x]) => `${px(i).toFixed(1)},${py(x).toFixed(1)}`).join(' ');
+  const col = idx[idx.length - 1][1] >= 0 ? 'var(--up)' : 'var(--down)';
+  return `<svg class="fspark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
+    role="img" aria-label="累计主力净流入走势">
+    <line x1="${pad}" y1="${py(0).toFixed(1)}" x2="${w - pad}" y2="${py(0).toFixed(1)}"
+      stroke="#3d444d" stroke-width="1" stroke-dasharray="3 3"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6"/>
+  </svg>`;
+}
+
+const yiCls = (v) => (v == null || !Number.isFinite(v) ? '' : (v >= 0 ? 'up' : 'dn'));
+
+function flowMarketCard(fl) {
+  const mk = fl?.market || {};
+  const t = mk.total || {};
+  const sh = mk.sh || {}, sz = mk.sz || {};
+  const legs = [['超大单', t.xlarge_yi], ['大单', t.large_yi],
+                ['中单', t.medium_yi], ['小单', t.small_yi]]
+    .map(([k, v]) => `<div class="fleg"><span>${k}</span>
+        <b class="${yiCls(v)}">${fmtYi(v)}</b></div>`).join('');
+  const side = (lb, o) => `<span><b>${lb}</b>
+      <i class="${yiCls(o.main_yi)}">${fmtYi(o.main_yi)}</i>
+      <u>${o.main_pct == null || !Number.isFinite(o.main_pct) ? '' : o.main_pct + '%'}</u></span>`;
+  return `<section class="card">
+    <h3>主力资金 · 大盘</h3>
+    <p class="flow-big ${yiCls(t.main_yi)}">${fmtYi(t.main_yi)}
+      <em>两市合计主力净流入</em></p>
+    <div class="flegs">${legs}</div>
+    ${spark(fl?.curve?.sum)}
+    <div class="fside">${side('沪市', sh)}${side('深市', sz)}</div>
+    <p class="flow-ts ${isStale(fl?.updated) ? 'stale' : ''}">更新 ${fl?.updated || '—'}
+      <i class="ago" id="flowAgo">${agoText(fl?.updated)}</i></p>
+    <p class="src">曲线为自开盘累计的主力净流入（亿元），最后一点即当日累计值；
+      主力 = 大单 + 超大单，四档（超大 / 大 / 中 / 小）互补、合计为 0。
+      板块榜单有实时来源，这一块<b>没有</b> —— 它随后端刷新，看的应是上面那行时间。</p>
+  </section>`;
+}
+
+function flowHistoryCard(fl) {
+  const h = fl?.history || {};
+  const days = h.days || 0;
+  if (!days) {
+    return `<section class="card"><h3>主力资金 · 近 20 日趋势</h3>
+      <p class="src">还没有历史数据。这段趋势是本系统<b>逐日累积</b>的
+        —— 东财的历史资金流接口在海外服务器上取不到（实测 push2his 连不上、
+        其余只回当天 1 条），所以今天起步、明天起逐日增加，攒满 20 天约需一个月。</p>
+    </section>`;
+  }
+  const n = Math.min(days, 10);
+  const rows = [];
+  for (let i = h.dates.length - 1; i >= Math.max(0, h.dates.length - n); i--) {
+    const v = (h.sum || [])[i];
+    rows.push(`<div class="fday"><span>${String(h.dates[i]).slice(5)}</span>
+      <b class="${yiCls(v)}">${fmtYi(v, 2)}</b></div>`);
+  }
+  return `<section class="card">
+    <h3>主力资金 · 近 ${days} 个交易日${days < 20 ? `（攒到 20 天约需一个月）` : ''}</h3>
+    ${spark(h.sum, 300, 46)}
+    <div class="fdays">${rows.join('')}</div>
+    <p class="src">这段历史是<b>本系统自己逐日记录的</b>，不是数据源给的现成序列；
+      当日值在盘中会被最新一次刷新覆盖，收盘那次就是最终值。</p>
+  </section>`;
+}
+
+function flowBoardsCard(fl, live) {
+  const isLive = !!(live && live.length);
+  const src = isLive ? live : (fl?.boards || []);
+  if (!src.length) {
+    return `<section class="card"><h3>板块主力资金</h3>
+      <p class="src">暂无板块资金流数据（本轮 clist 快照可能失败）。</p></section>`;
+  }
+  const row = (b) => `<button class="srow frow" data-code="${b.code}">
+      <span class="snm">${b.name}${Number.isFinite(b.pct)
+        ? `<em>${fmtPct(b.pct, 2)}</em>` : ''}</span>
+      <span class="sval ${(b.main_yi || 0) >= 0 ? 'rb' : 'dd'}">${fmtYi(b.main_yi, 2)}</span>
+      <span class="sval mut">${Number.isFinite(b.main_pct) ? fmtPct(b.main_pct, 2) : '—'}</span>
+    </button>`;
+  const ups = src.filter((b) => (b.main_yi || 0) > 0).slice(0, 10);
+  const dns = src.slice().reverse().filter((b) => (b.main_yi || 0) < 0).slice(0, 10);
+  const st = fl?.stats || {};
+  const inflowAll = isLive ? src.filter((b) => (b.main_yi || 0) > 0).length
+    : (st.inflow_n ?? 0);
+  const outflowAll = isLive ? src.filter((b) => (b.main_yi || 0) < 0).length
+    : (st.outflow_n ?? 0);
+  const head = `<div class="shead frow"><span>板块</span><span>主力净额</span>
+      <span>净占比</span></div>`;
+  const block = (title, arr) => arr.length ? `<h3 class="fsub">${title}</h3>
+      ${head}${arr.map(row).join('')}` : '';
+  return `<section class="card">
+    <h3>板块主力资金 ${isLive ? '<i class="flive">实时</i>' : ''}</h3>
+    <p class="fstat">净流入 <b class="up">${inflowAll}</b> 个
+      · 净流出 <b class="dn">${outflowAll}</b> 个
+      · 板块合计 <b class="${yiCls(st.net_yi)}">${fmtYi(st.net_yi)}</b></p>
+    ${block('主力净流入 TOP10', ups)}
+    ${block('主力净流出 TOP10', dns)}
+    <p class="src">${isLive
+      ? '以上为浏览器直连东财的<b>实时</b>值（f62 主力净额 / f184 净占比），与页面同时刻。'
+      : '以上为后端最近一版产物里的值，点开时若网络可达会自动换成实时值。'}
+      「净占比」= 主力净额 ÷ 成交额，用于横向比较不同体量的板块；点任意一行看板块详情。</p>
+  </section>`;
+}
+
+function renderFlow(fl, live) {
+  if (!fl) {
+    return `<div class="skel">暂无主力资金数据<br>
+      它由 pipeline/flow.py 生成 flow.json，请先跑一次 score</div>`;
+  }
+  return flowMarketCard(fl) + flowHistoryCard(fl) + flowBoardsCard(fl, live);
+}
+
+/** 板块资金流的实时值：复用实时补丁已经抓回来的那份快照，不额外请求 */
+async function liveFlowBoards() {
+  try {
+    const snap = await liveSnapshot();
+    if (!snap || !snap.length) return null;
+    const uni = new Set(state.idx.map((b) => b.code));
+    const rows = snap
+      .filter((r) => uni.has(r.code) && Number.isFinite(r.mainInflow))
+      .map((r) => ({ code: r.code, name: r.name, main_yi: r.mainInflow / 1e8,
+                     main_pct: r.mainPct, pct: r.pct }));
+    if (!rows.length) return null;
+    rows.sort((a, b) => b.main_yi - a.main_yi);
+    return rows;
+  } catch { return null; }
 }
 
 /* ==================== 事件日历（宏观 / 政策 / 市场事件） ====================
@@ -640,14 +837,16 @@ function renderSwingList() {
 
 const state = {
   idx: [], meta: {}, selected: [], current: null, version: '',
-  view: 'score',      // score | swing | events
+  view: 'score',      // score | market（大盘）| flow（主力资金）| swing | events
   win: 250,           // 回撤/涨幅的统计窗口（交易日）
   sort: 'dd',         // 回撤列表排序键
-  levels: null,       // 大盘关键位（levels.json）
+  levels: null,       // 大盘关键位（levels.json：均线 + 摆动档位）
   idxSel: 0,          // 当前查看的指数下标
   events: null,       // 事件日历（events.json）
   evCat: 'all',       // 事件类别筛选
   evLevel: 2,         // 事件优先级下限（默认只看 高 + 中，低优先靠筛选展开）
+  flow: null,         // 主力资金（flow.json）
+  liveFlow: null,     // 板块资金流的实时值（浏览器直连 clist 折算，可能为 null）
 };
 
 async function fetchJSON(path) {
@@ -676,11 +875,25 @@ function syncTabs() {
 
 async function renderCurrent() {
   $('#macro').innerHTML = renderMacroBar(state.meta);
-  paintLevels();
 
-  // 非评分视图（回撤 / 事件日历）：只重绘列表，不加载任何板块详情、不显示自选芯片
+  // 「大盘」视图：内容由 levels.json 驱动，装在 #body 之外的 #lvCard 里
+  // （避免被其它视图的整块重绘冲掉），所以这里只切换显隐 + 重绘它本身。
+  // 想让它恢复「常驻显示」，把下面这行改成 `$('#lvCard').hidden = false;` 即可。
+  $('#lvCard').hidden = state.view !== 'market';
+  if (state.view === 'market') paintLevels();
+
+  // 非评分视图（大盘 / 主力资金 / 回撤 / 事件日历）：只重绘自己的内容，
+  // 不加载任何板块详情、不显示自选芯片
   if (state.view !== 'score') {
     $('#chips').hidden = true;
+    if (state.view === 'market') { $('#body').innerHTML = ''; return; }
+    if (state.view === 'flow') {
+      // 先渲染后端值（秒出），再尝试换成实时值 —— 换失败了也已经有内容
+      $('#body').innerHTML = renderFlow(state.flow, state.liveFlow);
+      const lb = await liveFlowBoards();
+      if (lb) { state.liveFlow = lb; $('#body').innerHTML = renderFlow(state.flow, lb); }
+      return;
+    }
     $('#body').innerHTML = state.view === 'events' ? renderEvents() : renderSwingList();
     return;
   }
@@ -803,6 +1016,13 @@ async function boot() {
   } catch {
     state.events = null;
   }
+
+  // 主力资金：同样允许失败（后端这块可能因东财限流为空）
+  try {
+    state.flow = await fetchJSON(`${DATA}flow.json`);
+  } catch {
+    state.flow = null;
+  }
   paintTabBadge();
 
   demoBanner(meta);   // 合成演示数据必须显著标注，避免误当真数据
@@ -812,6 +1032,8 @@ async function boot() {
   setInterval(() => {
     const el = document.getElementById('agoTs');
     if (el) el.textContent = agoText(state.meta?.updated);
+    const fl = document.getElementById('flowAgo');
+    if (fl) fl.textContent = agoText(state.flow?.updated);
   }, 30000);
 
   // 自选要按当前板块宇宙过滤：切换层级（如一级 31 → 二级 127）后，

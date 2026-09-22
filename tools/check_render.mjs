@@ -94,6 +94,36 @@ if (!fs.existsSync(lvFp)) {
     .filter((x) => x.touches > 1);
   ok(touched.length === 0 || /lvtouch/.test(html),
     '日线「位置区 ×N」标记已渲染', `带 touches 的档位 ${touched.length} 个`);
+
+  /* ---- 均线体系（2026-09-22 新增：5/10/20/30/60 日线 + 年线）----
+     这组断言的重点不是「有没有渲染」，而是**性质与位置是否自洽**：
+     均线的支撑/压力是由「现价在它上方还是下方」推出来的，
+     一旦代码把 role 写死，页面照样显示得很正常 —— 必须靠这里抓。 */
+  const ma = I.ma;
+  ok(!!ma && Array.isArray(ma.lines) && ma.lines.length > 0,
+    'levels 含均线体系', ma ? `${ma.lines.length} 条` : 'missing');
+  if (ma && ma.lines.length) {
+    const need = ['ma5', 'ma10', 'ma20', 'ma30', 'ma60', 'ma250'];
+    const got = ma.lines.map((l) => l.key);
+    ok(need.every((k) => got.includes(k)),
+      '均线覆盖 5/10/20/30/60 日线与年线', got.join('/'));
+    const badRole = ma.lines.find((l) =>
+      (l.above && l.role !== 'support') || (!l.above && l.role !== 'resistance'));
+    ok(!badRole, '均线性质与「现价在上方/下方」自洽（上方=支撑、下方=压力）',
+      badRole ? JSON.stringify(badRole).slice(0, 90) : '');
+    const badGap = ma.lines.find((l) =>
+      !Number.isFinite(l.price) || !Number.isFinite(l.gap_pct)
+      || (l.above && l.gap_pct < 0) || (!l.above && l.gap_pct > 0));
+    ok(!badGap, '均线价格与距离符号自洽', badGap ? JSON.stringify(badGap).slice(0, 90) : '');
+    ok(ma.lines.every((l) => Number.isFinite(l.price) && typeof l.label === 'string'
+      && l.label.length > 0), '每条均线都有点位与中文标签');
+    ok(/ma-wrap/.test(html), '均线区块已渲染');
+    const maRows = (html.match(/class="ma-row /g) || []).length;
+    ok(maRows === ma.lines.length, '均线行数与数据条数一致',
+      `${maRows} 行 / ${ma.lines.length} 条`);
+    ok(ma.lines.some((l) => html.includes(l.label)), '均线标签渲染进页面');
+    ok(html.includes('lv-cap'), '均线区块与摆动档位分开标注');
+  }
 }
 
 /* ---------- 2b. 事件日历 ---------- */
@@ -154,6 +184,63 @@ if (!fs.existsSync(evFp)) {
   vm.runInContext('paintTabBadge()', ctx);
   const badge = vm.runInContext('upcomingHigh(7).length', ctx);
   ok(Number.isInteger(badge), 'tab 徽章统计可用（未来 7 天高优先事件）', `${badge} 条`);
+}
+
+/* ---------- 2c. 主力资金（flow.json，2026-09-22 新增） ---------- */
+const flowFp = path.join(DATA, 'flow.json');
+if (!fs.existsSync(flowFp)) {
+  console.log('! 缺少 web/data/flow.json，跳过（先跑一次 pipeline）');
+} else {
+  const fl = JSON.parse(fs.readFileSync(flowFp, 'utf8'));
+  ctx.__fl = fl;
+
+  ok(!!(fl.market && fl.market.total && fl.market.sh && fl.market.sz),
+    'flow.json 含 market（沪 / 深 / 合计）');
+  const curveLen = fl.curve?.t?.length || 0;
+  ok(Array.isArray(fl.curve?.t), 'flow.json 含分时时刻轴', `${curveLen} 点`);
+  ok(['sh', 'sz', 'sum'].every((k) => Array.isArray(fl.curve?.[k])
+    && fl.curve[k].length === curveLen), '分时三路长度与时刻轴一致');
+  const badCurve = (fl.curve?.sum || []).find((v) => v != null && !Number.isFinite(v));
+  ok(badCurve === undefined, '分时值均为有限数或 null（不出现 NaN）');
+  ok(['sh', 'sz', 'sum'].every((k) => Array.isArray(fl.history?.[k])
+    && fl.history[k].length === (fl.history?.dates || []).length),
+    '历史三路长度与日期轴一致', `${fl.history?.days ?? 0} 天`);
+  ok((fl.history?.dates || []).length <= 20, '历史最多 20 个交易日',
+    `${(fl.history?.dates || []).length} 天`);
+  const badBoard = (fl.boards || []).find((b) => !b.code || !b.name
+    || !Number.isFinite(b.main_yi));
+  ok(!badBoard, '每条板块榜记录都有 code/name/main_yi',
+    badBoard ? JSON.stringify(badBoard).slice(0, 90) : '');
+  const srt = (fl.boards || []).every((b, i, a) => i === 0 || a[i - 1].main_yi >= b.main_yi);
+  ok(srt, '板块榜按主力净流入降序（前端直接取 TOP/BOTTOM，顺序错就全错）');
+
+  const html = vm.runInContext('renderFlow(__fl, null)', ctx);
+  ok(html.includes('主力资金'), '主力资金卡片已渲染');
+  ok(/class="flow-big/.test(html), '大盘合计主力净流入已渲染');
+  ok(curveLen < 2 || /class="fspark"/.test(html),
+    '分时曲线已渲染（点数 < 2 时应缺省，而不是画一条假线）');
+  ok(/class="fleg"/.test(html), '主力四档拆解已渲染');
+
+  // 自校准断言：历史攒够 / 没攒够，页面文案必须与数据一致 ——
+  // 趋势是「本系统逐日累积」的，头几天就是没有数据，不能拿空图冒充趋势。
+  if ((fl.history?.days || 0) === 0) {
+    ok(html.includes('还没有历史数据'), '历史为空时明说「还没有历史数据」而非画空图');
+  } else {
+    ok(!html.includes('还没有历史数据'), '有历史数据时不再显示「还没有历史数据」');
+  }
+
+  const rows = (html.match(/class="srow frow"/g) || []).length;
+  const bs = fl.boards || [];
+  const want = Math.min(10, bs.filter((b) => b.main_yi > 0).length)
+             + Math.min(10, bs.filter((b) => b.main_yi < 0).length);
+  ok(rows === want, '板块榜单行数与数据一致', `${rows} 行 / 预期 ${want}`);
+
+  // 实时覆盖：伪造一份 live 榜单，必须出现「实时」标记并采用 live 的数值
+  const live = [{ code: (bs[0] || {}).code || 'BK0001', name: '测试板块名',
+                  main_yi: 12.34, main_pct: 5.67, pct: 1.23 }];
+  const lh = vm.runInContext(`renderFlow(__fl, ${JSON.stringify(live)})`, ctx);
+  ok(lh.includes('flive') && lh.includes('测试板块名') && lh.includes('+12.34'),
+    '传入实时值时改用实时值渲染并标注「实时」');
 }
 
 /* ---------- 3. 回撤 / 涨幅列表 ---------- */

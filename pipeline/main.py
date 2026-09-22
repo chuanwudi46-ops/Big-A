@@ -2,11 +2,15 @@
 """炒股工作台 · 数据管道入口
 
 用法:
-    python pipeline/main.py --stage warmup   # 13:40 预热：历史K线 / 映射表 / 宏观原始数据 / 新闻
-    python pipeline/main.py --stage score    # 14:00 主评分：盘中快照 -> 12维 -> 发布
-    python pipeline/main.py --stage close    # 15:30 收盘复核：重算并归档
+    python pipeline/main.py --stage warmup   # 盘前预热：历史K线 / 映射表 / 宏观原始数据 / 新闻
+    python pipeline/main.py --stage score    # 盘中评分：快照 -> 12维 -> 发布
+    python pipeline/main.py --stage close    # 收盘复核：补当日收盘K线、重算并归档
     python pipeline/main.py --stage score --force      # 忽略交易日判断
     python pipeline/main.py --stage warmup --rebuild-map  # 强制重建个股-板块映射
+
+每日节奏（北京时间，见 .github/workflows/daily.yml）：
+    09:10 warmup（一天一次）→ 09:35~15:05 每 30 分钟 score（其中 09:45 / 13:25 两档
+    是为「09:50 / 13:30 开始操作」专门加的）→ 15:35 close（当天唯一一次写整份归档）。
 
 产物统一写入 web/data/，随 GitHub Pages 一起发布。
 """
@@ -29,6 +33,7 @@ import chips                 # noqa: E402
 import clock                 # noqa: E402
 import events as EV          # noqa: E402
 import factors as F          # noqa: E402
+import flow                  # noqa: E402
 import levels                # noqa: E402
 import macro as M            # noqa: E402
 import score as S            # noqa: E402
@@ -172,6 +177,17 @@ def stage_warmup(w: dict, meta: dict, rebuild_map: bool = False) -> None:
         _write_parquet("index_sh.parquet", sh)
     except Exception as e:  # noqa: BLE001
         print(f"[warn] sh000001: {e}")
+
+    # ---- 主力资金流历史（尽力而为，一天试一次）
+    # 海外 runner 上东财的历史资金流接口基本拿不到（push2his 连不上、其余只回当天 1 条，
+    # 2026-09-22 探针实测），所以趋势主要靠 score 阶段**逐日累积**。
+    # 这里每天仍试一次：成本只是几个快速失败的连接，而万一哪个域名哪天放开了，
+    # 就能一次补回几十天历史。
+    try:
+        fh = flow.refresh_daily(_read_parquet("flow_hist.parquet"))
+        _write_parquet("flow_hist.parquet", fh)
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] flow hist: {str(e)[:110]}")
 
     # ---- 个股 → 板块 映射（筹码归属基础）
     chips.build_map(meta["boards"], force=rebuild_map)
@@ -440,6 +456,23 @@ def stage_score(w: dict, meta: dict, full_archive: bool = False) -> None:
               f"｜最近高优先 {nh.get('date', '')} {nh.get('name', '')}")
     except Exception as e:  # noqa: BLE001
         print(f"[warn] events: {str(e)[:140]}")
+
+    # ---- 主力资金流（大盘沪深两市 + 板块排行）
+    # 复用本轮**已经拿到的 snap**：clist 是最容易触发对端限流的通道，能省一次是一次。
+    # 分时走 push2delay（海外 runner 上唯一可用的域名，见 sources.py 的实测表）。
+    # 整块失败只让这个视图空着，绝不阻断评分主流程。
+    try:
+        fl, fh = flow.build(snap, {str(b["code"]) for b in meta["boards"]},
+                            _read_parquet("flow_hist.parquet"), intraday=intraday)
+        _dump(DATA / "flow.json", fl)
+        _write_parquet("flow_hist.parquet", fh)
+        mk = fl["market"]
+        print(f"[score] 主力资金流 两市 {mk['total'].get('main_yi')} 亿"
+              f"（沪 {mk['sh'].get('main_yi')} / 深 {mk['sz'].get('main_yi')}）"
+              f"｜板块 净流入 {fl['stats']['inflow_n']}/{fl['stats']['board_count']}"
+              f"｜分时 {len(fl['curve']['t'])} 点｜历史 {fl['history']['days']} 天")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warn] flow: {str(e)[:140]}")
 
     # ---- 归档策略（weights.yaml 的 archive 段）
     # 为什么默认「只在 close 阶段归档」：整份快照约 200 KB/次，而盘中已改成每 30 分钟

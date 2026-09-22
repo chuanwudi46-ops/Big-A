@@ -227,11 +227,16 @@ footer { text-align: center; color: #4b5563; font-size: 11px; padding: 14px 12px
 .opt input { width: 20px; height: 20px; accent-color: var(--up); flex: 0 0 auto; }
 
 /* --------------------------------------------------- 视图切换 tabs */
-.tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+/* 视图从 3 个增到 5 个（+大盘 / 主力资金）后，窄屏单行会挤：允许横向滚动。
+   按钮用 `flex: 1 0 auto` + min-width —— 放得下就均分宽度（和原来一样），
+   放不下才滚动，不会把文字压成两行。 */
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
 .tabs button {
-  flex: 1; min-height: 36px;
+  flex: 1 0 auto; min-width: 62px; white-space: nowrap; padding: 0 8px;
+  min-height: 36px;
   border: 1px solid var(--line); border-radius: 10px;
-  background: #12171e; color: var(--mut); font-size: 13.5px;
+  background: #12171e; color: var(--mut); font-size: 13px;
 }
 .tabs button.on { color: var(--fg); border-color: #3d444d; background: #1d242c; }
 
@@ -398,3 +403,95 @@ footer { text-align: center; color: #4b5563; font-size: 11px; padding: 14px 12px
 .sbar i { display: block; height: 100%; border-radius: 3px; background: #64748b; }
 .sbar i.hi { background: linear-gradient(90deg, #f97316, #ef4444); }
 .sbar i.lo { background: linear-gradient(90deg, #0ea5e9, #22c55e); }
+
+/* ------------------------------------------------- 均线体系（大盘视图）
+   现价在均线上方 → 该均线是支撑（绿）；下方 → 是压力（红）。
+   与 .lv-res / .lv-sup 用同一套色，避免同一页里「压力」有两种颜色。 */
+.lv-cap {
+  margin: 12px 0 4px; font-size: 11px; color: #6b7280;
+  padding-top: 8px; border-top: 1px solid var(--line);
+}
+.ma-wrap { margin: 10px 0 0; }
+.ma-th, .ma-row {
+  display: grid; grid-template-columns: 1fr 68px 62px 40px;
+  gap: 6px; align-items: center;
+}
+.ma-th { padding: 0 2px 4px; border-bottom: 1px solid var(--line); }
+.ma-th b {
+  font-size: 11px; color: #6b7280; font-weight: 500;
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+}
+.ma-th span, .ma-th em {
+  font-size: 11px; color: #6b7280; text-align: right; font-style: normal;
+}
+.ma-arr {
+  font-style: normal; font-size: 10.5px; padding: 0 4px; border-radius: 4px;
+  background: #1f2630; color: var(--mut); white-space: nowrap;
+}
+.ma-arr.up { color: #f87171; background: #2a1416; }
+.ma-arr.dn { color: #4ade80; background: #10201a; }
+.ma-row { min-height: 32px; border-bottom: 1px solid var(--line); }
+.ma-row:last-child { border-bottom: 0; }
+.ma-row > b {
+  font-size: 13px; font-weight: 500;
+  display: flex; align-items: center; gap: 3px; min-width: 0;
+}
+.ma-row.res > b { color: #f87171; }
+.ma-row.sup > b { color: #4ade80; }
+.maslope { font-style: normal; font-size: 11px; opacity: .8; }
+.maslope.up { color: #f87171; }
+.maslope.dn { color: #4ade80; }
+.ma-price, .ma-gap { text-align: right; font-variant-numeric: tabular-nums; }
+.ma-price { font-size: 13px; }
+.ma-gap { font-size: 11.5px; color: var(--mut); }
+.ma-role { font-style: normal; font-size: 11px; text-align: right; opacity: .9; }
+.ma-row.res .ma-role { color: #f87171; }
+.ma-row.sup .ma-role { color: #4ade80; }
+.ma-sum { margin: 6px 0 0; font-size: 11.5px; color: #c9d1d9; line-height: 1.6; }
+
+/* ------------------------------------------------- 主力资金（flow 视图） */
+.flow-big {
+  margin: 2px 0 10px; font-size: 26px; font-weight: 600;
+  font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 8px;
+}
+.flow-big em { font-style: normal; font-size: 11px; color: var(--mut); font-weight: 400; }
+.flegs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;
+}
+.fleg {
+  background: #12171e; border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px 4px; text-align: center;
+}
+.fleg span { display: block; font-size: 10.5px; color: #6b7280; margin-bottom: 2px; }
+.fleg b { font-size: 12px; font-variant-numeric: tabular-nums; }
+.fspark { display: block; width: 100%; height: 56px; }
+.fside { display: flex; gap: 10px; margin-top: 8px; }
+.fside > span {
+  flex: 1; display: flex; align-items: baseline; gap: 6px;
+  font-size: 12px; color: var(--mut);
+}
+.fside b { color: var(--fg); font-weight: 500; }
+.fside i { font-style: normal; font-variant-numeric: tabular-nums; }
+.fside u { text-decoration: none; font-size: 11px; color: #6b7280; }
+.flow-ts { margin: 10px 0 0; font-size: 11.5px; color: var(--mut); }
+.flow-ts .ago { font-style: normal; margin-left: 6px; opacity: .85; }
+.flow-ts.stale, .flow-ts.stale .ago { color: #fbbf24; }
+.fdays { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 12px; margin-top: 8px; }
+.fday {
+  display: flex; justify-content: space-between; gap: 6px;
+  font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line);
+}
+.fday span { color: var(--mut); }
+.fday b { font-variant-numeric: tabular-nums; }
+.fsub { margin-top: 14px !important; }
+.fstat { margin: 0 0 4px; font-size: 12px; color: var(--mut); }
+.fstat b { font-weight: 600; }
+.flive {
+  font-style: normal; font-size: 10.5px; padding: 1px 5px; border-radius: 4px;
+  background: #10201a; color: #4ade80; margin-left: 4px;
+}
+.up { color: var(--up); }
+.dn { color: var(--down); }
+.mut { color: var(--mut); }
+/* 资金流榜单：3 列（板块 / 主力净额 / 净占比），覆盖 .srow 的 4 列网格 */
+.shead.frow, .srow.frow { grid-template-columns: 1fr 84px 62px; }

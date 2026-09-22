@@ -765,6 +765,130 @@ def margin_balance() -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------
+# 主力资金流（大盘 / 板块）
+# --------------------------------------------------------------------------
+# 资金流的域名可用性与其他接口**完全不同**，实测结果（海外 runner + 本机，2026-09-22）：
+#   fflow/kline（当日分时）  : push2delay ✅ 240 点 / push2 ❌ 502 / 82.push2 ❌ 连不上
+#   fflow/daykline（日线历史）: push2his ❌ 连不上 / push2delay ⚠️ 只回当天 1 条 / push2 ⚠️ 同
+#   clist（板块快照）        : push2delay ✅ / push2 ✅（496 个板块，含 f62/f184/f66）
+#   clist 个股资金流 fs=m:0+t:6,… : ❌ 502，该 fs 组合不可用
+# 所以：① 分时只认 push2delay，顺序不能改；② **不要指望日线历史**，见 flow.py 的自建方案。
+# `ut` 是东财页面自己在用的公开参数（不是我们的 token）：带了 push2his 才给历史，
+# 不带就静默只回 1 条 —— 那种「看着有数据、其实是残缺的」最难发现。
+FFLOW_UT = "b2884a393a59ad64002292a3e90d46a5"
+FLOW_F1 = "f1,f2,f3,f7"
+FLOW_F2 = "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+
+FLOW_MIN_HOSTS = (
+    "https://push2delay.eastmoney.com",
+    "https://push2.eastmoney.com",
+    "https://82.push2.eastmoney.com",
+)
+FLOW_HIST_HOSTS = (
+    "https://push2his.eastmoney.com",
+    "https://push2delay.eastmoney.com",
+    "https://push2.eastmoney.com",
+)
+
+# 大盘资金流的口径：东财「大盘资金流」页就是拿这两个 secid 加起来
+# （沪市 1.000001 = 上证指数口径，深市 0.399001 = 深证成指口径）。
+MARKET_SECIDS = (("sh", "1.000001", "沪市"), ("sz", "0.399001", "深市"))
+
+# fflow 的 klines 字段顺序（实测校准，别照抄别人的表）：
+#   时间, 主力净流入, 小单, 中单, 大单, 超大单[, 各自净占比 ×5, 收盘, 涨跌幅, ...]
+# 逐行恒等式（实测成立，也是这里的自校验依据）：
+#   大单 + 超大单 == 主力  ；  小单 + 中单 + 大单 + 超大单 == 0（四类互补）
+FLOW_KLINE_COLS = ("time", "main", "small", "medium", "large", "xlarge")
+FLOW_PCT_COLS = ("main_pct", "small_pct", "medium_pct", "large_pct", "xlarge_pct")
+
+
+def _parse_flow_klines(klines) -> list[dict]:
+    """把 fflow 的 klines 解析成结构化行。
+
+    分钟线只有 6 个字段（时间 + 5 个净流入），日线有 15 个（多出 5 个净占比、
+    收盘价、涨跌幅…）。**同一接口两种长度**，所以按「至少 6 列」解析，
+    多出来的列有就取、没有就跳过 —— 写成固定 15 列会在分钟线上整片丢数据。
+    """
+    out: list[dict] = []
+    for line in klines or []:
+        p = str(line).split(",")
+        if len(p) < 6:
+            continue
+        row: dict = {}
+        try:
+            row["date"] = p[0]
+            for i, k in enumerate(FLOW_KLINE_COLS[1:], start=1):
+                row[k] = float(p[i])
+        except (TypeError, ValueError):
+            continue
+        for j, k in enumerate(FLOW_PCT_COLS):
+            idx = 6 + j
+            if len(p) > idx:
+                try:
+                    row[k] = float(p[idx])
+                except (TypeError, ValueError):
+                    pass
+        if len(p) > 11:
+            for k, idx in (("close", 11), ("chg_pct", 12)):
+                try:
+                    row[k] = float(p[idx])
+                except (TypeError, ValueError):
+                    pass
+        out.append(row)
+    return out
+
+
+def _flow_klines(hosts: tuple[str, ...], secid: str, klt: int,
+                 table: str, attempts: int = 2) -> list[dict]:
+    """拉资金流 klines（分时 / 日线）。
+
+    空数组一律视为失败并换下一个域名：push2delay 的软限流是 **HTTP 200 + klines 空**，
+    只看状态码会把「限流」当成功，下游拿到的因子就被静默压成中性值。
+
+    `attempts` 可下调为 1：当上层已经知道「这个用途大概率拿不到」时
+    （如海外 runner 上的日线历史），多轮重试只是白等（见 flow.refresh_daily）。
+    """
+    last_err: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        if attempt:
+            time.sleep(2.0)
+        for base in hosts:
+            url = (f"{base}/api/qt/stock/fflow/{table}/get?lmt=0&klt={klt}"
+                   f"&secid={secid}&fields1={FLOW_F1}&fields2={FLOW_F2}&ut={FFLOW_UT}")
+            try:
+                r = _get(url, timeout=20)
+                r.raise_for_status()
+                rows = _parse_flow_klines(
+                    ((r.json().get("data") or {}).get("klines") or []))
+                if not rows:
+                    last_err = RuntimeError(f"{base} 返回空 klines（疑似限流）")
+                    continue
+                return rows
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+    raise RuntimeError(f"资金流 {table} {secid} 全通道失败：{str(last_err)[:110]}")
+
+
+def fund_flow_minute(secid: str) -> list[dict]:
+    """当日分时主力资金流（klt=1，约 240 个点，累计口径）。
+
+    每个点的 `main` 是**从开盘累计到该时刻**的主力净流入，不是当分钟增量 ——
+    所以画出来是曲线、取最后一个点就是当日累计值。
+    """
+    return _flow_klines(FLOW_MIN_HOSTS, secid, 1, "kline")
+
+
+def fund_flow_daily(secid: str, attempts: int = 2) -> list[dict]:
+    """日线资金流历史（klt=101）。
+
+    ⚠️ 海外 runner 上**拿不到历史**（2026-09-22 探针实测）：push2his 直接连不上，
+    push2delay / push2 虽然 200 但只回**当天 1 条**。所以这个函数的产物
+    「有就更好、没有也行」，历史靠 flow.py 自己逐日累积，不要让它成为硬依赖。
+    """
+    return _flow_klines(FLOW_HIST_HOSTS, secid, 101, "daykline", attempts)
+
+
+# --------------------------------------------------------------------------
 # 交易日历
 # --------------------------------------------------------------------------
 def trade_dates() -> list[str]:
