@@ -1,0 +1,25 @@
+name: _livecheck
+
+# 一次性：在**未被限流**的海外 runner 上跑前端实时补丁回归。
+# 本机连东财被限流（UND_ERR_SOCKET / RemoteDisconnected），这条路走不通。
+# 用完即删（跑完把它从仓库移除）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 实时补丁回归（翻页覆盖 / 字段可用性 / 线上命中率）
+        run: node tools/check_live_paging.mjs

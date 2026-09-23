@@ -91,5 +91,26 @@ if (index.length) {
     `命中 ${hit.length}/${want.size}；不翻页则只有 ${oldHit.length}/${want.size}`);
 }
 
+// 3.4 「主力资金」板块排行所依赖的字段必须真的回得来
+// 静默失效风险：东财对不认识的字段**不报错，只是不返回**。一旦 f62 没了，
+// liveFlowBoards() 会被 `Number.isFinite(r.mainInflow)` 全部过滤掉、返回 null，
+// 然后**不动声色**地退回后端那份收盘旧值 —— 页面看着完全正常，实时能力已经死了。
+{
+  const need = ['f62', 'f184'];
+  const miss = need.filter((k) => !(k in (rows[0] || {})));
+  ok(miss.length === 0, 'clist 返回板块排行所需字段（f62 主力净流入 / f184 净占比）',
+    miss.length ? `缺 ${miss.join(', ')}` : `${need.length} 个都在`);
+
+  const cnt = (k) => rows.filter((r) => Number.isFinite(r[k])).length;
+  const n62 = cnt('f62');
+  ok(n62 > 0, 'f62 有可用数值（全为 null 会让实时板块排行整体退化成后端旧值）',
+    `${n62}/${rows.length} 条`);
+  if (n62 > 0) {
+    ok(cnt('f184') / n62 >= 0.9,
+      'f184 覆盖率 ≥90%（与 f62 同源，掉了说明请求被削字段）',
+      `${cnt('f184')}/${n62}`);
+  }
+}
+
 console.log(failed ? `\n✗ ${failed} 项未通过` : '\n✓ 全部通过');
 process.exit(failed ? 1 : 0);

@@ -135,12 +135,17 @@ function isStale(s) {
       我们只做本地索引、不关心顺序，故换稳定排序键零副作用。
    ================================================================= */
 const LIVE_HOSTS = ['push2.eastmoney.com', 'push2delay.eastmoney.com'];
-// f184 主力净占比、f66/f72/f78/f84 超大单/大单/中单/小单净额 —— 「主力资金」视图
-// 的板块排行要用。实测这几个字段和 f62 同在一个 clist 响应里，多要不花钱。
-const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f66,f72,f78,f84,f104,f105,f184';
+// f62 主力净流入 + f184 主力净占比 —— 「主力资金」的**板块排行**与「板块评分」的
+// 资金流补丁都要用（实测两者同在一个 clist 响应里，一起要不额外花钱）。
+// ⚠️ 只要**实际被读**的字段：四档拆解（f66/f72/f78/f84）**大盘那一路才需要**，
+// 而大盘块的数据来自后端 flow.json（分时接口不吃 cb=，浏览器补不了），
+// 板块排行则只显示主力合计 —— 所以这里要了也没人读，纯属多传 4 列 × 120 行的流量。
+const LIVE_FIELDS = 'f2,f3,f8,f12,f14,f62,f104,f105,f184';
 const LIVE_PAGE = 100;               // 服务端硬上限，改大无效
-// 缓存键版本位：**改了 LIVE_FIELDS 就必须升**（snap2 -> snap3），
+// 缓存键版本位：**只要「新增了会被读的字段」就必须升**（snap2 -> snap3），
 // 否则用户端 IndexedDB 里还是那份缺新字段的旧快照，「修了等于没修」。
+// 反向不成立：**砍掉没人读的字段不用升** —— 旧快照是多出来的超集，仍然满足新需求，
+// 升了只会让所有用户白重下一遍。
 // 见 china-finance-data-from-overseas-runner 手册「步骤 7 ④」。
 const LIVE_CACHE_KEY = 'snap3';
 
@@ -189,7 +194,6 @@ async function liveSnapshot() {
           down: r.f105,
           mainInflow: r.f62,        // 主力净流入（元）
           mainPct: r.f184,          // 主力净占比（%）
-          xlarge: r.f66, large: r.f72, medium: r.f78, small: r.f84,
         }));
       if (!rows.length) continue;
       await Store.set(LIVE_CACHE_KEY, { ts: Date.now(), rows, host });
