@@ -1,0 +1,43 @@
+name: livecheck
+
+# 前端实时补丁的**网络相关**回归 —— 手动触发，不参与定时构建。
+#
+# 为什么需要它：`tools/check_live_paging.mjs` 要直连东财 clist，而使用者的
+# 网络（涉密内网）对东财有持续限流 —— 本机跑必然失败（UND_ERR_SOCKET /
+# RemoteDisconnected），但这**不代表代码坏**。把它放到没被限流的 runner 上跑，
+# 才能得到一个有意义的结论。
+#
+# 什么时候跑：
+#   - 动过 web/app.js 里 `LIVE_HOSTS` / `LIVE_FIELDS` / `liveURL` / `liveAll`
+#   - 东财改了字段或首页排序，怀疑实时补丁命中率掉了
+#   - 发了新的板块宇宙（index.json 变了）之后
+#
+# 它查什么（都是**静默失效**级别的坑，页面不会报错）：
+#   1. 翻页覆盖 —— clist 单页硬截断 100 条。实测不翻页只有 68/120 命中，
+#      而且页面照样正常显示，只是大多数板块的实时值悄悄没了。
+#   2. 排序键必须静态（fid=f12）。用 f3 涨幅排序时盘中翻页会串位。
+#   3. **f62/f184 真的回得来** —— 东财对不认识的字段不报错、只是不返回；
+#      一旦 f62 没了，liveFlowBoards() 会被 Number.isFinite 全过滤掉、
+#      返回 null，然后不动声色地退回收盘旧值。
+#
+# 本机可跑但通常会被限流：`node tools/check_live_paging.mjs`（失败≠代码坏）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read          # 只读，不提交、不部署
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 实时补丁回归（翻页覆盖 / 字段可用性 / 线上命中率）
+        run: node tools/check_live_paging.mjs

@@ -197,6 +197,11 @@ python pipeline/levels.py
 # 主力资金（大盘分时 + 板块排行）。⚠️ 本机常被对端限流，会输出降级结果（字段仍完整、值为 null）
 python pipeline/flow.py
 
+# 前端实时补丁回归（翻页覆盖 / f62·f184 字段可用性 / 线上命中率，要求 120/120）
+# ⚠️ 本机对东财持续限流，跑它大概率报 UND_ERR_SOCKET —— 那是网络问题，「失败 ≠ 代码坏」。
+#    权威跑法：派到未被限流的 runner 上（只读，不提交不部署）
+python tools/dispatch.py --workflow livecheck.yml
+
 # 本地预览前端
 cd web && python -m http.server 8080
 # 浏览器打开 http://127.0.0.1:8080/  （手机同 Wi-Fi 可用 http://<电脑IP>:8080/）
